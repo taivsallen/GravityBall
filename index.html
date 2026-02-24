@@ -1,0 +1,4473 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>引力軌道大師 (Orbital Master) - Star Edition</title>
+    <script src="https://cdn.tailwindcss.com">
+		function setCookie(name, value, days) {
+		  const maxAge = days ? ';max-age=' + (days*24*60*60) : '';
+		  document.cookie = `${name}=${encodeURIComponent(value)};path=/${maxAge};SameSite=Lax`;
+		}
+		function getCookie(name) {
+		  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+		  return m ? decodeURIComponent(m[2]) : null;
+		}
+	</script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+		/*
+		#btn-unlock-all {
+		  display: none !important;
+		}
+		*/
+        /* 允許整頁使用基本手勢（但 canvas 我們會單獨鎖住） */
+		body {
+		  margin: 0;
+		  overflow: hidden;
+		  background-color: #050505;
+		  font-family: 'Orbitron', sans-serif;
+		  /* 不要把 touch-action:none 放在 body 上，否則會阻止 modal 滾動 */
+		  touch-action: manipulation;
+		  -webkit-tap-highlight-color: transparent;
+		}
+
+		/* canvas 保留鎖手勢，避免畫面拖動/縮放 */
+		canvas {
+		  display: block;
+		  touch-action: none;
+		}
+
+        /* --- UI Elements --- */
+        .ui-panel {
+            position: absolute;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            pointer-events: auto;
+        }
+
+        .bottom-bar {
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            pointer-events: auto;
+            gap: 15px;
+            padding-bottom: 20px;
+        }
+		
+		.top-bar, .bottom-bar {
+			pointer-events: none; /* allow clicks to pass through */
+		}
+
+        .hud-text {
+            color: #00f3ff;
+            text-shadow: 0 0 10px rgba(0, 243, 255, 0.5);
+        }
+
+        .btn {
+            background: rgba(0, 20, 40, 0.8);
+            border: 1px solid #00f3ff;
+            color: #00f3ff;
+            padding: 12px 24px;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            backdrop-filter: blur(5px);
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+        }
+
+        .btn:hover {
+            background: rgba(0, 243, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.6);
+        }
+
+        .btn:active { transform: translateY(0); }
+
+        .btn.selected {
+            background: #00f3ff;
+            color: #000;
+            box-shadow: 0 0 20px #00f3ff;
+        }
+
+        .btn.start-btn {
+            border-color: #00ff66;
+            color: #00ff66;
+            box-shadow: 0 0 10px rgba(0, 255, 102, 0.2);
+        }
+        .btn.start-btn:hover {
+            background: rgba(0, 255, 102, 0.2);
+            box-shadow: 0 0 20px rgba(0, 255, 102, 0.6);
+        }
+
+		/* replay 按鈕：以 start-btn 的樣式為藍本，改成亮黃色 */
+		.btn.replay-btn {
+			border-color: #ffd700;
+			color: #ffd700;
+			box-shadow: 0 0 10px rgba(255, 215, 0, 0.2);
+		}
+		.btn.replay-btn:hover {
+			background: rgba(255, 215, 0, 0.12);
+			box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
+		}
+
+
+        .tool-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 12px;
+            width: 80px;
+        }
+		.top-bar .btn,
+		.bottom-bar .btn,
+		.tool-btn {
+			pointer-events: auto;
+		}
+
+        .tool-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            margin-bottom: 5px;
+            border: 2px solid white;
+        }
+        
+        .icon-attract { background: radial-gradient(circle, #000 30%, #a855f7 100%); border-color: #a855f7; box-shadow: 0 0 10px #a855f7;}
+        .icon-repel { background: radial-gradient(circle, #fff 30%, #f97316 100%); border-color: #f97316; box-shadow: 0 0 10px #f97316;}
+        .icon-eraser { background: #ff3333; border-color: #ff3333; box-shadow: 0 0 10px #ff3333;}
+
+        /* --- Modals & Menus --- */
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+
+        /* Level Select Grid */
+        .level-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .level-card {
+            background: rgba(0, 30, 50, 0.8);
+            border: 1px solid #445566;
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .level-card:hover {
+            border-color: #00f3ff;
+            transform: scale(1.05);
+            background: rgba(0, 40, 70, 0.9);
+        }
+
+        .level-card.locked {
+            opacity: 0.5;
+            cursor: not-allowed;
+            filter: grayscale(100%);
+        }
+
+        .stars-display {
+            display: flex;
+            justify-content: center;
+            gap: 5px;
+            margin-top: 10px;
+        }
+
+        .star-icon {
+            color: #333;
+            font-size: 14px;
+        }
+        .star-icon.filled {
+            color: #ffd700;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
+        }
+
+        .hidden { display: none !important; }
+
+        #level-complete-stars {
+            font-size: 40px;
+            margin-bottom: 20px;
+            color: #333;
+        }
+        #level-complete-stars .filled {
+            color: #ffd700;
+            text-shadow: 0 0 20px #ffd700;
+        }
+		
+		/* 限制選單高度並啟用內部滾動 */
+		.menu-box {
+			display: flex;
+			flex-direction: column;
+			align-items: stretch;
+			box-sizing: border-box;    /* padding 計入高度，方便計算 max-height */
+			padding: 30px;
+			text-align: center;
+			max-width: 800px;
+			width: 90%;
+			border-radius: 10px;
+			background: rgba(0, 10, 20, 0.95);
+			border: 2px solid #00f3ff;
+			position: relative;
+			box-shadow: 0 0 50px rgba(0, 243, 255, 0.2);
+			max-height: 80vh;          /* 限制最大高度，讓 inner 容器捲動 */
+			overflow: hidden;          /* 由內層負責滾動 */
+		}
+		.menu-box > .header,
+		.menu-box > .text-left,
+		.menu-box > h1,
+		.menu-box > p {
+			flex: 0 0 auto;
+		}
+
+
+		/* 滾動包裹容器：實際顯示滾動條 */
+		.level-grid-wrap {
+			flex: 1 1 auto;               /* 填滿剩餘空間 */
+			overflow-y: auto;             /* 啟用滾動 */
+			padding-right: 8px;           /* 給滾軸留空 */
+			padding-bottom: 22px;         /* 保留底部空間，避免最後一排被遮住 */
+			box-sizing: border-box;
+			-webkit-overflow-scrolling: touch; /* iOS 平滑滾動 */
+			touch-action: auto;           /* 覆寫 body，允許在此容器滾動 */
+			scroll-padding-bottom: 24px;  /* 當用 scrollIntoView 時，給出視窗底部安全邊距 */
+		}
+		/* 加點底部 margin 確保最後一格有視覺空間 */
+		.level-grid .level-card:last-child {
+			margin-bottom: 8px;
+		}
+
+		/* 美化滾動條（WebKit）*/
+		.level-grid-wrap::-webkit-scrollbar { width: 10px; }
+		.level-grid-wrap::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); border-radius: 10px; }
+		.level-grid-wrap::-webkit-scrollbar-thumb {
+			background: linear-gradient(180deg, rgba(0,243,255,0.9), rgba(0,255,102,0.9));
+			border-radius: 10px;
+			border: 2px solid rgba(0,0,0,0.25);
+		}
+
+		/* Firefox 瀏覽器支援 */
+		@supports (scrollbar-width: thin) {
+			.level-grid-wrap { scrollbar-width: thin; scrollbar-color: rgba(0,255,102,0.9) rgba(255,255,255,0.02); }
+		}
+
+		/* 若想讓卡片在滾動容器內仍有平滑進入效果（可選） */
+		.level-grid {
+			/* 保持現有 grid 設定，新增 gap 與 auto-rows 可視需求微調 */
+			gap: 20px;
+		}
+		
+		
+    </style>
+</head>
+<body>
+
+    <div id="game-ui" class="ui-panel hidden">
+        <div class="top-bar">
+            <div class="flex flex-col gap-2">
+                <button onclick="game.returnToMenu()" class="btn text-xs px-2 py-1 border-gray-600 text-gray-400 hover:text-white">
+                    ← 主選單 (MENU)
+                </button>
+                <div class="hud-text text-xl font-bold p-4 bg-black/50 rounded border border-cyan-900">
+                    LEVEL <span id="level-display">1</span>
+                    <div class="text-xs text-gray-400 mt-1">Collected: <span id="star-counter" class="text-yellow-400">0</span>/3</div>
+                </div>
+            </div>
+            <button onclick="game.resetLevel()" class="btn m-4 text-sm">重置 (Reset)</button>
+        </div>
+
+        <div class="bottom-bar">
+            <button id="btn-attract" class="btn tool-btn selected" onclick="game.setTool('attract')">
+                <div class="tool-icon icon-attract"></div>
+                <div>黑洞 (引力)</div>
+                <div id="ammo-attract" class="text-xs text-purple-400 mt-1">x3</div>
+            </button>
+            
+            <button id="btn-repel" class="btn tool-btn" onclick="game.setTool('repel')">
+                <div class="tool-icon icon-repel"></div>
+                <div>白洞 (斥力)</div>
+                <div id="ammo-repel" class="text-xs text-orange-400 mt-1">x3</div>
+            </button>
+
+            <button id="btn-eraser" class="btn tool-btn" onclick="game.setTool('eraser')">
+                <div class="tool-icon icon-eraser" style="background: transparent; display: flex; justify-content: center; align-items: center;">✖</div>
+                <div>移除</div>
+                <div class="text-xs text-gray-500 mt-1">---</div>
+            </button>
+
+            <div class="w-4"></div> <button id="btn-launch" class="btn start-btn w-32 h-full flex items-center justify-center" onclick="game.toggleSim()">
+                發射 (LAUNCH)
+            </button>
+        </div>
+    </div>
+
+    <div id="main-menu" class="modal-overlay">
+        <div class="menu-box">
+            <h1 class="text-4xl text-cyan-400 font-bold mb-2 tracking-wider">引力軌道大師</h1>
+			<p class="text-gray-400 text-sm tracking-widest mb-8">ORBITAL MASTER</p>
+            
+            <!-- 將 SELECT LEVEL 區塊換成這個：左側是標題，右側是解鎖按鈕（同一高度） -->
+			<div class="text-left mb-4 border-b border-gray-700 pb-2 flex items-center justify-between">
+			  <span class="text-xl text-white">選擇關卡 (SELECT LEVEL)</span>
+
+			  <!-- 解鎖按鈕：放在右側，與 SELECT LEVEL 同一行 
+			  <button id="btn-unlock-all" class="btn text-sm" onclick="game.toggleUnlockAll()">
+				解鎖模式: OFF
+			  </button>-->
+			</div>
+
+
+            <div class="level-grid-wrap">
+				<div id="level-grid-container" class="level-grid"></div>
+			</div>
+        </div>
+    </div>
+
+    <div id="tutorial-modal" class="modal-overlay hidden">
+        <div class="menu-box" style="max-width: 500px;">
+            <h1 class="text-2xl text-cyan-400 mb-4 font-bold">操作指南</h1>
+            <p class="text-gray-300 mb-6 text-left leading-relaxed text-sm">
+                1. <span class="text-purple-400 font-bold">黑洞</span> 吸引光球，<span class="text-orange-400 font-bold">白洞</span> 排斥光球。<br>
+                2. 收集場景中的 <span class="text-yellow-400 font-bold">★ 星星</span>。<br>
+                3. 引導光球進入 <span class="text-green-400 font-bold">傳送門</span>。<br>
+                <br>
+                <span class="text-gray-500 text-xs">*只有成功過關時，收集的星星才會被保存。</span>
+            </p>
+            <button class="btn w-full" onclick="game.closeTutorial()">開始挑戰</button>
+        </div>
+    </div>
+
+    <div id="level-complete-modal" class="modal-overlay hidden">
+        <div class="menu-box" style="max-width: 400px; border-color: #00ff66;">
+            <h2 class="text-3xl text-green-400 mb-2 font-bold">軌道穩定!</h2>
+            <div id="level-complete-stars">
+                <span>★</span><span>★</span><span>★</span>
+            </div>
+            <p class="text-white mb-6">目標達成。</p>
+            <div class="flex gap-4 justify-center">
+				<button class="btn" onclick="game.returnToMenu()">選單</button>
+
+				<!-- 新增：重新遊玩 -->
+				<button class="btn replay-btn" onclick="game.replayLevel()">重新遊玩</button>
+
+				<button class="btn start-btn" onclick="game.nextLevel()">下一關</button>
+			</div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- Audio System ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'place') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'collect') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1200, now);
+                osc.frequency.linearRampToValueAtTime(1800, now + 0.1);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } else if (type === 'delete') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'bounce') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, now);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'win') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.linearRampToValueAtTime(600, now + 0.2);
+                osc.frequency.linearRampToValueAtTime(800, now + 0.4);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.linearRampToValueAtTime(0, now + 1.0);
+                osc.start(now);
+                osc.stop(now + 1.0);
+            } else if (type === 'die') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, now);
+                osc.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+        }
+
+        // --- Vector Helper ---
+        class Vec2 {
+            constructor(x, y) { this.x = x; this.y = y; }
+            add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+            sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
+            mult(n) { return new Vec2(this.x * n, this.y * n); }
+            div(n) { return new Vec2(this.x / n, this.y / n); }
+            mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+            normalize() { const m = this.mag(); return m === 0 ? new Vec2(0,0) : this.div(m); }
+            dist(v) { return this.sub(v).mag(); }
+        }
+		
+		// ---------------- helper: segment-segment distance ----------------
+		function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+		// shortest distance between segments p1-p2 and q1-q2
+		function segmentSegmentDistance(p1, p2, q1, q2) {
+		  const u = p2.sub(p1);
+		  const v = q2.sub(q1);
+		  const w = p1.sub(q1);
+		  const a = u.x*u.x + u.y*u.y;
+		  const b = u.x*v.x + u.y*v.y;
+		  const c = v.x*v.x + v.y*v.y;
+		  const d = u.x*w.x + u.y*w.y;
+		  const e = v.x*w.x + v.y*w.y;
+		  const D = a*c - b*b;
+		  let sc, sN, sD = D;
+		  let tc, tN, tD = D;
+		  const EPS = 1e-9;
+
+		  if (D < EPS) { sN = 0.0; sD = 1.0; tN = e; tD = c; }
+		  else {
+			sN = (b*e - c*d);
+			tN = (a*e - b*d);
+			if (sN < 0) { sN = 0; tN = e; tD = c; }
+			else if (sN > sD) { sN = sD; tN = e + b; tD = c; }
+		  }
+
+		  if (tN < 0) {
+			tN = 0;
+			if (-d < 0) sN = 0;
+			else if (-d > a) sN = sD;
+			else { sN = -d; sD = a; }
+		  } else if (tN > tD) {
+			tN = tD;
+			if ((-d + b) < 0) sN = 0;
+			else if ((-d + b) > a) sN = sD;
+			else { sN = (-d + b); sD = a; }
+		  }
+
+		  sc = Math.abs(sN) < EPS ? 0.0 : sN / sD;
+		  tc = Math.abs(tN) < EPS ? 0.0 : tN / tD;
+
+		  const dP = w.add(u.mult(sc)).sub(v.mult(tc));
+		  return dP.mag();
+		}
+
+
+        // --- Game Objects ---
+
+        // 在 Star 類別中加入 orbit 支援（在原本 class Star 裡改 draw/update）
+		class Star {
+		  constructor(x, y) {
+			this.pos = new Vec2(x, y);
+			this.r = 12;
+			this.collected = false;
+			this.angle = Math.random() * Math.PI;
+			this.orbit = null; // { center:Vec2, r:Number, speed:Number, phase:Number }
+			this._appearAt = 0; // ms timestamp for delayed appearance
+			this._createdAt = performance.now();
+		  }
+		  reset() { this.collected = false; }
+
+		  draw(ctx) {
+			if (this.collected) return;
+			const now = performance.now();
+
+			// orbit handling if set
+			if (this.orbit) {
+			  this.angle = (this.angle || 0) + (this.orbit.speed || 0.02);
+			  this.pos.x = this.orbit.center.x + Math.cos(this.angle + (this.orbit.phase||0)) * this.orbit.r;
+			  this.pos.y = this.orbit.center.y + Math.sin(this.angle + (this.orbit.phase||0)) * this.orbit.r;
+			}
+
+			// timed appear: only draw AFTER appearAt
+			if (this._appearAt && now < this._appearAt) return;
+
+			// original draw logic
+			this.angle += 0.02;
+			ctx.save();
+			ctx.translate(this.pos.x, this.pos.y);
+			ctx.rotate(this.angle);
+			ctx.fillStyle = '#ffd700';
+			ctx.shadowColor = '#ffd700';
+			ctx.shadowBlur = 15;
+			ctx.beginPath();
+			ctx.moveTo(0, -this.r);
+			ctx.lineTo(this.r * 0.6, 0);
+			ctx.lineTo(0, this.r);
+			ctx.lineTo(-this.r * 0.6, 0);
+			ctx.closePath();
+			ctx.fill();
+			ctx.shadowBlur = 0;
+			ctx.restore();
+		  }
+		}
+
+        class Ball {
+            constructor(x, y) {
+                this.startPos = new Vec2(x, y);
+                this.pos = new Vec2(x, y);
+                this.vel = new Vec2(1, 0);
+                this.acc = new Vec2(0, 0);
+                this.r = 8;
+                this.active = false;
+                this.trail = [];
+                this.color = '#00f3ff';
+            }
+            reset() {
+                this.pos = new Vec2(this.startPos.x, this.startPos.y);
+                this.vel = new Vec2(2, 0);
+                this.acc = new Vec2(0, 0);
+                this.active = false;
+                this.trail = [];
+            }
+            applyForce(force) { this.acc = this.acc.add(force); }
+            update() {
+                if (!this.active) return;
+                this.vel = this.vel.add(this.acc);
+                this.pos = this.pos.add(this.vel);
+                this.acc = this.acc.mult(0);
+                this.trail.push({x: this.pos.x, y: this.pos.y});
+                if (this.trail.length > 20) this.trail.shift();
+            }
+            draw(ctx) {
+                // Trail
+                ctx.beginPath();
+                for (let i = 0; i < this.trail.length; i++) {
+                    const p = this.trail[i];
+                    const alpha = i / this.trail.length;
+                    ctx.lineTo(p.x, p.y);
+                    ctx.strokeStyle = `rgba(0, 243, 255, ${alpha})`;
+                }
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Ball
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.r, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.color;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        class GravityWell {
+            constructor(x, y, type) {
+                this.pos = new Vec2(x, y);
+                this.type = type;
+                this.r = 15;
+                this.strength = type === 'attract' ? 150 : -150;
+                this.pulse = 0;
+            }
+            draw(ctx) {
+                this.pulse += 0.05;
+                const pulseSize = Math.sin(this.pulse) * 3;
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.r + pulseSize, 0, Math.PI * 2);
+                
+                if (this.type === 'attract') {
+                    ctx.fillStyle = '#000';
+                    ctx.strokeStyle = '#a855f7';
+                    ctx.shadowColor = '#a855f7';
+                } else {
+                    ctx.fillStyle = '#fff';
+                    ctx.strokeStyle = '#f97316';
+                    ctx.shadowColor = '#f97316';
+                }
+                
+                ctx.lineWidth = 3;
+                ctx.shadowBlur = 20;
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                // Field visual
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.r * 3, 0, Math.PI * 2);
+                ctx.strokeStyle = this.type === 'attract' ? 'rgba(168, 85, 247, 0.1)' : 'rgba(249, 115, 22, 0.1)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        }
+		class Wormhole {
+		  constructor(x, y, exitX, exitY, id = null, meta = {}) {
+			this.pos = new Vec2(x, y);
+			this.exit = new Vec2(exitX, exitY);
+			this.r = 22;
+			this.id = id;
+			this.pulse = 0;
+			this._meta = Object.assign({ mirror:false, timeLimited:false, ttl:0, movableWhenNear:null, seqId:null }, meta || {});
+			if (this._meta.timeLimited && this._meta.ttl) this._meta.openedAt = performance.now();
+			this._open = true;
+		  }
+		  update() {
+			this.pulse += 0.08;
+			const m = this._meta;
+			if (m.timeLimited) {
+			  const now = performance.now();
+			  if (m.ttl && now - (m.openedAt||now) > m.ttl) this._open = false;
+			} else this._open = true;
+			if (m.movableWhenNear && this._open && window.game && game.ball) {
+			  const dist = game.ball.pos ? game.ball.pos.dist(this.pos) : Infinity;
+			  if (dist < (m.movableWhenNear.range||160)) {
+				const snap = m.movableWhenNear.snapTo;
+				if (snap) {
+				  this.pos.x += (snap.x - this.pos.x) * 0.12;
+				  this.pos.y += (snap.y - this.pos.y) * 0.12;
+				}
+			  }
+			}
+		  }
+		  draw(ctx) {
+			if (!this._open) {
+			  // draw faint closed ring
+			  ctx.globalAlpha = 0.18;
+			  ctx.beginPath(); ctx.arc(this.pos.x, this.pos.y, this.r, 0, Math.PI*2); ctx.fillStyle='rgba(80,10,120,0.06)'; ctx.fill();
+			  ctx.globalAlpha = 1;
+			  return;
+			}
+			this.pulse += 0.08;
+			const pulseSize = Math.sin(this.pulse) * 4;
+			ctx.beginPath();
+			ctx.arc(this.pos.x, this.pos.y, this.r + pulseSize, 0, Math.PI*2);
+			ctx.fillStyle = 'rgba(80,10,120,0.14)';
+			ctx.fill();
+			ctx.beginPath();
+			ctx.arc(this.pos.x, this.pos.y, this.r * 0.65, 0, Math.PI*2);
+			ctx.fillStyle = 'rgba(160,85,247,0.95)';
+			ctx.shadowBlur = 18; ctx.shadowColor = '#a855f7'; ctx.fill(); ctx.shadowBlur = 0;
+			// exit marker
+			ctx.beginPath(); ctx.arc(this.exit.x, this.exit.y, 6, 0, Math.PI*2); ctx.fillStyle = 'rgba(0,255,102,0.9)'; ctx.fill();
+		  }
+		}
+
+        // 替換你原本的 Obstacle class（保留 constructor 兼容性）
+		class Obstacle {
+		  constructor(x, y, w, h, isDeadly = false, moveX = 0, moveY = 0, speed = 0, kind = null, meta = {}) {
+			this.pos = new Vec2(x, y);
+			this.origPos = new Vec2(x, y);
+			this.w = w; this.h = h;
+			this.isDeadly = !!isDeadly;
+			this.moveVec = new Vec2(moveX, moveY);
+			this.speed = speed;
+			this.time = 0;
+			// _meta: 對應複雜行為（rotating_bar, pulsing_block, fragile_platform, randMine, reflect_wall, queueZone ...）
+			this._meta = Object.assign({ kind: kind }, meta || {});
+			// rotating bar default fields if needed
+			if (this._meta.kind === 'rotating_bar') {
+			  this._meta.cx = this._meta.cx || (x + w/2);
+			  this._meta.cy = this._meta.cy || (y + h/2);
+			  this._meta.half = (this._meta.length || w) / 2;
+			  this._meta.angle = this._meta.angle || 0;
+			  this._meta.angularSpeed = this._meta.angularSpeed || 0.02;
+			  this._meta.length = this._meta.length || w;
+			  this._meta.thickness = this._meta.thickness || Math.max(6, h);
+			}
+			if (this._meta.kind === 'pulsing_block') {
+			  this._meta._t0 = performance.now();
+			  this._meta.period = this._meta.period || 1200;
+			  this._meta.phase = this._meta.phase || 0;
+			  this._meta.lethal = !!this._meta.lethal;
+			}
+			if (this._meta.kind === 'fragile_platform') {
+			  this._meta.born = this._meta.born || performance.now();
+			  this._meta.lifetime = this._meta.lifetime || 1000;
+			  this._meta.collapsed = false;
+			}
+			// queueZone: stored as big invisible box (o.w o.h) with meta queue logic
+		  }
+
+		  update() {
+			// existing position animation
+			if (this.speed > 0) {
+			  this.time += 0.02;
+			  const offset = Math.sin(this.time * this.speed);
+			  this.pos.x = this.origPos.x + this.moveVec.x * offset;
+			  this.pos.y = this.origPos.y + this.moveVec.y * offset;
+			}
+
+			// meta behaviors
+			const m = this._meta || {};
+			if (m.kind === 'rotating_bar') {
+			  m.angle = (m.angle || 0) + m.angularSpeed;
+			  // keep Obstacle.pos bounding box approx in case other code depends on it
+			  this.pos.x = m.cx - m.length/2;
+			  this.pos.y = m.cy - (m.thickness/2);
+			  this.w = m.length; this.h = m.thickness;
+			} else if (m.kind === 'pulsing_block') {
+			  const t = (performance.now() - (m._t0||0));
+			  const phaseRatio = ((t % m.period) / m.period);
+			  m._visible = (Math.sin(phaseRatio * Math.PI * 2 + m.phase) > 0);
+			  // lethal flag already in m.lethal
+			} else if (m.kind === 'fragile_platform') {
+			  const elapsed = performance.now() - (m.born || performance.now());
+			  m._remain = Math.max(0, m.lifetime - elapsed);
+			  if (m._remain <= 0 && !m.collapsed) {
+				m.collapsed = true;
+				// 變成致命小塊或移除（這裡標成 deadly 小塊）
+				this.isDeadly = true;
+				this.w = Math.max(8, this.w * 0.5);
+				this.h = Math.max(8, this.h * 0.5);
+			  }
+			}
+			// randMine / queueZone 等，大多保留到 Game.update 處理
+		  }
+
+		  draw(ctx) {
+			const m = this._meta || {};
+			if (m.kind === 'rotating_bar') {
+			  // draw a line between endpoints
+			  const ang = m.angle || 0;
+			  const half = m.half || (this.w/2);
+			  const cx = m.cx; const cy = m.cy;
+			  const x1 = cx + Math.cos(ang) * -half, y1 = cy + Math.sin(ang) * -half;
+			  const x2 = cx + Math.cos(ang) * half,  y2 = cy + Math.sin(ang) * half;
+			  ctx.lineWidth = m.lethal ? 8 : 6;
+			  ctx.strokeStyle = m.lethal ? '#ff3333' : '#8899aa';
+			  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+			} else if (m.kind === 'pulsing_block') {
+			  if (m._visible) {
+				ctx.fillStyle = m.lethal ? '#ff3333' : '#445566';
+				ctx.fillRect(this.pos.x, this.pos.y, this.w, this.h);
+			  }
+			} else if (m.kind === 'queueZone') {
+			  // draw faint circle to indicate zone (optional)
+			  ctx.globalAlpha = 0.08;
+			  ctx.fillStyle = '#00ff66';
+			  const r = m.r || (this.w/2);
+			  ctx.beginPath(); ctx.arc(this.pos.x + this.w/2, this.pos.y + this.h/2, r, 0, Math.PI*2); ctx.fill();
+			  ctx.globalAlpha = 1;
+			} else {
+			  // default draw uses your original style
+			  ctx.fillStyle = this.isDeadly ? '#ff3333' : '#445566';
+			  ctx.strokeStyle = this.isDeadly ? '#ff0000' : '#8899aa';
+			  ctx.lineWidth = 2;
+			  ctx.beginPath();
+			  // if roundRect exists
+			  if (ctx.roundRect) {
+				ctx.roundRect(this.pos.x, this.pos.y, this.w, this.h, 5);
+				ctx.fill();
+				ctx.stroke();
+			  } else {
+				ctx.fillRect(this.pos.x, this.pos.y, this.w, this.h);
+				ctx.strokeRect(this.pos.x, this.pos.y, this.w, this.h);
+			  }
+			}
+		  }
+		}
+
+        class Target {
+            constructor(x, y) {
+                this.pos = new Vec2(x, y);
+                this.r = 25;
+                this.angle = 0;
+            }
+            draw(ctx) {
+                this.angle += 0.02;
+                ctx.save();
+                ctx.translate(this.pos.x, this.pos.y);
+                ctx.rotate(this.angle);
+                ctx.beginPath();
+                ctx.arc(0, 0, this.r, 0, Math.PI * 2);
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([10, 5]);
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#00ff66';
+                ctx.stroke();
+                ctx.rotate(this.angle * -2);
+                ctx.fillStyle = 'rgba(0, 255, 102, 0.3)';
+                ctx.fillRect(-10, -10, 20, 20);
+                ctx.restore();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.pos = new Vec2(x, y);
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 3;
+                this.vel = new Vec2(Math.cos(angle) * speed, Math.sin(angle) * speed);
+                this.life = 1.0;
+                this.color = color;
+            }
+            update() {
+                this.pos = this.pos.add(this.vel);
+                this.life -= 0.02;
+            }
+            draw(ctx) {
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // --- Main Game Class ---
+
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                
+				this.unlockAll = false; // false = 按關卡解鎖流程；true = 任意關可進入
+				this.unlockAllMode = false; // <- 預設 OFF
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+
+                this.ball = null;
+                this.wells = [];
+                this.obstacles = [];
+                this.stars = [];
+                this.target = null;
+                this.particles = [];
+				this.wormholes = [];
+
+                this.level = 1;
+                this.state = 'menu'; // menu, editing, simulating, won, failed
+                this.selectedTool = 'attract';
+                
+                this.levelConfig = [];
+                this.maxWells = { attract: 3, repel: 3 };
+                
+                // Save system
+                // load progress (constructor)
+				let saved = null;
+				try { saved = JSON.parse(localStorage.getItem('orbital_save')); } catch(e){}
+				if (!saved) {
+				  const cookieVal = getCookie('orbital_save');
+				  if (cookieVal) {
+					try { saved = JSON.parse(cookieVal); } catch(e){ saved = null; }
+				  }
+				}
+				this.progress = saved || {};
+				
+				// --- cheat/unlock-all flag (persisted) ---
+				this.debugUnlockAll = (localStorage.getItem('orbital_unlock_all') === '1');
+                
+				this.mouse = new Vec2(0, 0);
+                
+                this.setupLevels();
+                this.renderMainMenu();
+                
+                // Events
+				// 在 constructor 裡面（放在 this.mouse = ... 之後）
+				this.dragging = null; // { index: number, offset: Vec2, pointerId } 或 null
+
+				// pointerdown / move / up 支援（同時支援觸控與滑鼠）
+				this.canvas.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
+				this.canvas.addEventListener('pointermove', (e) => this.handlePointerMove(e));
+				window.addEventListener('pointerup', (e) => this.handlePointerUp(e));
+				window.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
+
+				// 保留 mouse position 更新（也在 pointermove 內會更新）
+
+
+                this.loop();
+				this.updateUnlockButton();
+            }
+			
+			toggleUnlockAll() {
+				this.debugUnlockAll = !this.debugUnlockAll;
+				try {
+					localStorage.setItem('orbital_unlock_all', this.debugUnlockAll ? '1' : '0');
+				} catch (e) { /* ignore */ }
+
+				// 更新按鈕外觀與文字
+				this.updateUnlockButton();
+
+				// 重新 render 關卡清單讓鎖定狀態立即生效
+				this.renderMainMenu();
+			}
+
+			// 同步按鈕狀態（在 constructor init 與 toggle 後呼叫）
+			updateUnlockButton() {
+			  const btn = document.getElementById('btn-unlock-all');
+			  if (!btn) return;
+			  btn.innerText = `解鎖模式: ${this.debugUnlockAll ? 'ON' : 'OFF'}`;
+			  btn.classList.toggle('selected', !!this.debugUnlockAll);
+
+			  // 如果你也放在遊戲界面（可選），同步更新另一個 id
+			  const btnGame = document.getElementById('btn-unlock-all-game');
+			  if (btnGame) {
+				btnGame.innerText = `解鎖模式: ${this.debugUnlockAll ? 'ON' : 'OFF'}`;
+				btnGame.classList.toggle('selected', !!this.debugUnlockAll);
+			  }
+			}
+			
+			segmentCircleIntersect(a, b, c, r) {
+				// a: Vec2 start, b: Vec2 end, c: Vec2 circle center, r: radius
+				const ab = b.sub(a);
+				const ac = c.sub(a);
+				const ab2 = ab.x * ab.x + ab.y * ab.y;
+				let t = 0;
+				if (ab2 > 0) {
+					t = (ac.x * ab.x + ac.y * ab.y) / ab2;
+					t = Math.max(0, Math.min(1, t));
+				}
+				const closest = a.add(ab.mult(t));
+				return closest.dist(c) <= r;
+			}
+
+			handleInputDown(x, y) {
+				if (this.state !== 'editing') return;
+				const clickPos = new Vec2(x, y);
+
+				// 如果選擇移除工具：嘗試刪除附近的 well
+				if (this.selectedTool === 'eraser') {
+					for (let i = this.wells.length - 1; i >= 0; i--) {
+						if (clickPos.dist(this.wells[i].pos) < 30) {
+							this.wells.splice(i, 1);
+							playSound('delete');
+							this.spawnParticles(x, y, '#ff3333');
+							this.updateUI();
+							return;
+						}
+					}
+					return;
+				}
+
+				// 否則放置 well（檢查 ammo）
+				const currentCount = this.wells.filter(w => w.type === this.selectedTool).length;
+				if (currentCount >= this.maxWells[this.selectedTool]) return;
+				if (clickPos.dist(this.ball.startPos) < 50) return;
+				if (clickPos.dist(this.target.pos) < 50) return;
+
+				this.wells.push(new GravityWell(x, y, this.selectedTool));
+				playSound('place');
+				this.spawnParticles(x, y, this.selectedTool === 'attract' ? '#a855f7' : '#f97316');
+				this.updateUI();
+			}
+
+			// pointer down: 開始拖移或放置/刪除
+			handlePointerDown(e) {
+				if (this.state !== 'editing') return;
+
+				const rect = this.canvas.getBoundingClientRect();
+				const x = e.clientX - rect.left;
+				const y = e.clientY - rect.top;
+				this.mouse.x = x; this.mouse.y = y;
+
+				// 先檢查是否點到某個 well（優先判定）
+				let hitIndex = -1;
+				for (let i = this.wells.length - 1; i >= 0; i--) {
+					if (this.wells[i].pos.dist(new Vec2(x, y)) < 30) {
+						hitIndex = i;
+						break;
+					}
+				}
+
+				if (hitIndex !== -1) {
+					// 如果現在是移除工具 -> 直接刪除並結束（不要開始拖移）
+					if (this.selectedTool === 'eraser') {
+						const removed = this.wells.splice(hitIndex, 1);
+						if (removed.length) {
+							playSound('delete');
+							this.spawnParticles(x, y, '#ff3333');
+							this.updateUI();
+						}
+						return;
+					}
+
+					// 否則（非移除工具）才開始拖移
+					const w = this.wells[hitIndex];
+					const offset = new Vec2(x - w.pos.x, y - w.pos.y);
+					this.dragging = { index: hitIndex, offset, pointerId: e.pointerId };
+					try { e.target.setPointerCapture(e.pointerId); } catch (err) {}
+					return;
+				}
+
+				// 沒有點到 well：執行放置或刪除邏輯（使用現有輸入處理）
+				// 當 selectedTool === 'eraser' 且沒有點到 well，handleInputDown 會嘗試刪除附近的 well（無害）
+				this.handleInputDown(x, y);
+			}
+
+			// pointer move: 拖移時更新 well 位置；同時更新 mouse pos（顯示游標圈）
+			handlePointerMove(e) {
+				const rect = this.canvas.getBoundingClientRect();
+				const x = e.clientX - rect.left;
+				const y = e.clientY - rect.top;
+				this.mouse.x = x; this.mouse.y = y;
+
+				if (this.dragging) {
+					// 找到要被拖曳的 well，更新位置（跟隨 pointer 減去 offset）
+					const d = this.dragging;
+					const w = this.wells[d.index];
+					if (!w) {
+						this.dragging = null;
+						return;
+					}
+					w.pos.x = x - d.offset.x;
+					w.pos.y = y - d.offset.y;
+					// optional: clamp inside canvas
+					w.pos.x = Math.max(0, Math.min(this.canvas.width, w.pos.x));
+					w.pos.y = Math.max(0, Math.min(this.canvas.height, w.pos.y));
+					this.updateUI(); // 更新 ammo 顯示或按鈕狀態（若需要）
+				}
+			}
+
+			// pointer up / cancel: 放開拖曳
+			handlePointerUp(e) {
+				if (this.dragging && this.dragging.pointerId === e.pointerId) {
+					try { e.target.releasePointerCapture(e.pointerId); } catch (err) {}
+					// 放下物件時可以播放放置音效
+					const d = this.dragging;
+					const w = this.wells[d.index];
+					if (w) playSound('place');
+					this.dragging = null;
+					this.updateUI();
+				}
+			}
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            setupLevels() {
+                const w = this.canvas.width;
+                const h = this.canvas.height;
+                const cx = w / 2;
+                const cy = h / 2;
+				
+				const hardStartX = w * 0.05, hardEndX = w * 0.95;
+				
+                // --- 手動設計的教學關卡 (1-5) ---
+                this.levelConfig = [
+                    { // Level 1: 入門
+                        ball: { x: w * 0.1, y: cy },
+                        target: { x: w * 0.9, y: cy },
+                        obstacles: [],
+                        stars: [{x: cx, y: cy}, {x: w*0.3, y: cy - 50}, {x: w*0.7, y: cy + 50}],
+                        ammo: { attract: 2, repel: 0 }
+                    },
+                    { // Level 2: 障礙
+                        ball: { x: w * 0.1, y: cy },
+                        target: { x: w * 0.9, y: cy },
+                        obstacles: [ new Obstacle(cx - 20, cy - 100, 40, 200) ],
+                        stars: [{x: cx, y: cy - 120}, {x: cx, y: cy + 120}, {x: w*0.5, y: cy}],
+                        ammo: { attract: 3, repel: 0 }
+                    },
+                    { // Level 3: 紅色危險區
+                        ball: { x: w * 0.1, y: h * 0.8 },
+                        target: { x: w * 0.9, y: h * 0.2 },
+                        obstacles: [
+                            new Obstacle(cx - 100, h * 0.4, 200, 20, true),
+                            new Obstacle(cx + 100, 0, 20, h * 0.6)
+                        ],
+                        stars: [{x: cx, y: h*0.5}, {x: w*0.8, y: h*0.5}, {x: w*0.2, y: h*0.7}],
+                        ammo: { attract: 2, repel: 2 }
+                    },
+                    { // Level 4: 移動障礙
+                        ball: { x: 100, y: 100 },
+                        target: { x: w - 100, y: h - 100 },
+                        obstacles: [
+                            new Obstacle(cx, 0, 20, h, false, 0, 0, 0),
+                            new Obstacle(cx - 150, cy, 20, 100, true, 0, 150, 2),
+                            new Obstacle(cx + 130, cy, 20, 100, true, 0, -150, 3)
+                        ],
+                        stars: [{x: cx - 50, y: cy}, {x: cx + 50, y: cy}, {x: w*0.8, y: h*0.2}],
+                        ammo: { attract: 3, repel: 3 }
+                    },
+                    { // Level 5: 迷宮
+                        ball: { x: 100, y: 100 },
+                        target: { x: w - 100, y: 100 },
+                        obstacles: [
+                            new Obstacle(w * 0.3, 0, 30, h * 0.7), 
+                            new Obstacle(w * 0.6, h * 0.3, 30, h * 0.7),
+                            new Obstacle(w * 0.3, h * 0.8, 300, 20, true)
+                        ],
+                        stars: [{x: w*0.45, y: h*0.1}, {x: w*0.45, y: h*0.9}, {x: w*0.8, y: h*0.5}],
+                        ammo: { attract: 4, repel: 4 }
+                    },
+					{ // Level 6: Miner Field II（散落礦區）
+					  ball:   { x: w * 0.1, y: h * 0.25 },
+					  target: { x: w * 0.9, y: h * 0.75 },
+					  obstacles: (function(){
+						const arr = [];
+						const count = 7;
+						for (let j = 0; j < count; j++) {
+						  const ox = w * 0.2 + (j / count) * w * 0.6;
+						  const oy = h * 0.15 + ((j%2)?0.4:0.2) * h;
+						  const isDeadly = j % 3 === 0;
+						  arr.push(new Obstacle(ox, oy, 28, 28, isDeadly));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.18, y: h * 0.28 },
+						{ x: w * 0.48, y: h * 0.45 },
+						{ x: w * 0.82, y: h * 0.7 }
+					  ],
+					  ammo: { attract: 3, repel: 2 }
+					},
+					{ // Level 7: Vertical Gates II（移動閘門 - 更密集）
+					  ball:   { x: w * 0.1, y: h * 0.5 },
+					  target: { x: w * 0.9, y: h * 0.5 },
+					  obstacles: (function(){
+						const arr = [];
+						const count = 5;
+						const gap = (w * 0.6) / count;
+						for (let j = 0; j < count; j++) {
+						  const ox = w * 0.25 + j * gap;
+						  const moveRange = 120;
+						  const speed = 1.8 + j * 0.2;
+						  const dir = j % 2 === 0 ? 1 : -1;
+						  arr.push(new Obstacle(ox, cy - 70, 22, 140, true, 0, moveRange * dir, speed));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.5 },
+						{ x: w * 0.5,  y: h * 0.35 },
+						{ x: w * 0.78, y: h * 0.55 }
+					  ],
+					  ammo: { attract: 4, repel: 3 }
+					},
+					{ // Level 8: Narrow Tunnel II（狹窄隧道 - 層狀）
+					  ball:   { x: w * 0.12, y: h * 0.2 },
+					  target: { x: w * 0.88, y: h * 0.8 },
+					  obstacles: (function(){
+						const arr = [];
+						const rows = 5;
+						const width = w * 0.45;
+						for (let r = 0; r < rows; r++) {
+						  const ox = w * 0.2 + (r % 2) * 40;
+						  const oy = (r / rows) * h + 20;
+						  arr.push(new Obstacle(ox, oy, width, 22, false));
+						  // 每隔一行放一個小致命方塊增加風險
+						  if (r % 2 === 1) arr.push(new Obstacle(ox + width * 0.6, oy + 10, 18, 18, true));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.15, y: h * 0.18 },
+						{ x: w * 0.5,  y: h * 0.5 },
+						{ x: w * 0.85, y: h * 0.82 }
+					  ],
+					  ammo: { attract: 3, repel: 2 }
+					},
+					{ // Level 9: Rotating Array II（交錯方塊陣列）
+					  ball:   { x: w * 0.1, y: h * 0.7 },
+					  target: { x: w * 0.9, y: h * 0.3 },
+					  obstacles: (function(){
+						const arr = [];
+						const cols = 4;
+						const rows = 3;
+						const spacingX = (w * 0.5) / cols;
+						const spacingY = (h * 0.5) / rows;
+						for (let c = 0; c < cols; c++) {
+						  for (let r = 0; r < rows; r++) {
+							const ox = w * 0.25 + c * spacingX;
+							const oy = h * 0.2 + r * spacingY;
+							const isDeadly = ((c + r) % 2 === 0);
+							const speed = 1.2 + 0.4 * c + 0.2 * r;
+							const moveX = 25 * ((r % 2 === 0) ? 1 : -1);
+							arr.push(new Obstacle(ox, oy, 22, 22, isDeadly, moveX, 0, speed));
+						  }
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.68 },
+						{ x: w * 0.5,  y: h * 0.45 },
+						{ x: w * 0.82, y: h * 0.28 }
+					  ],
+					  ammo: { attract: 4, repel: 3 }
+					},
+					{ // Level 10: Hybrid Gauntlet（混合挑戰：中段密集 + 終點護衛）
+					  ball:   { x: 100, y: h - 140 },
+					  target: { x: w - 100, y: 100 },
+					  obstacles: [
+						// 中段密集小致命方塊群
+						new Obstacle(w * 0.35, h * 0.55, 30, 30, true, 0, 90, 2),
+						new Obstacle(w * 0.43, h * 0.45, 30, 30, true, 0, -90, 1.6),
+						new Obstacle(w * 0.5,  h * 0.6,  40, 20, false, 0, 60, 1.2),
+						// 靠近終點護盾與路障
+						new Obstacle(w - 220, 40, 20, 120, true, 0, 100, 2.4),
+						new Obstacle(w - 120, 30, 120, 20, false, 100, 0, 1.4)
+					  ],
+					  stars: [
+						{ x: 140,             y: h - 120 },
+						{ x: w * 0.52,        y: h * 0.5 - 20 },
+						{ x: w - 140,         y: 140 }
+					  ],
+					  ammo: { attract: 4, repel: 4 }
+					},
+					{ // Level 11: Crusher（垂直夾擊） - 模版 A
+					  // start 左 -> target 右
+					  ball: { x: w * 0.1, y: h * 0.3 },
+					  target: { x: w * 0.9, y: h * 0.7 },
+					  obstacles: [
+						// 三組夾擊牆（上半、下半）
+						(function(){
+						  const ox = w * 0.35, openingY = h * 0.35, openingSize = 90;
+						  return [ new Obstacle(ox, 0, 20, openingY, true, 0, 60, 1.6),
+								   new Obstacle(ox, openingY + openingSize, 20, h, true, 0, -60, 1.6) ];
+						})().flat()
+					  ].flat(),
+					  stars: [
+						{ x: w * 0.15, y: h * 0.3 },              // 起點附近簡單星
+						{ x: w * 0.5,  y: h * 0.45 },             // 中段位置
+						{ x: w * 0.78, y: h * 0.65 }              // 終點附近困難星
+					  ],
+					  ammo: { attract: 3, repel: 1 }
+					},
+					{ // Level 12: Minefield（流動雷區） - 模版 B
+					  ball: { x: w * 0.1, y: h * 0.6 },
+					  target: { x: w * 0.9, y: h * 0.4 },
+					  obstacles: (function(){
+						const arr = [];
+						const mines = 12;
+						for(let j=0;j<mines;j++){
+						  const ox = w * 0.2 + Math.random() * w * 0.6;
+						  const oy = h * 0.15 + Math.random() * h * 0.7;
+						  const speed = 2 + Math.random() * 2;
+						  const moveX = Math.random() > 0.5 ? (40 + Math.random()*80) : 0;
+						  const moveY = moveX === 0 ? (40 + Math.random()*80) : 0;
+						  arr.push(new Obstacle(ox, oy, 16, 16, true, moveX, moveY, speed));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.6 },
+						{ x: w * 0.5,  y: h * 0.35 },
+						{ x: w * 0.82, y: h * 0.2 }
+					  ],
+					  ammo: { attract: 4, repel: 2 }
+					},
+					{ // Level 13: Fortress（終點護盾） - 模版 C
+					  ball: { x: w * 0.12, y: h * 0.2 },
+					  target: { x: w * 0.88, y: h * 0.8 },
+					  obstacles: [
+						// 外層左右護盾（移動）
+						new Obstacle(w * 0.88 - 60, h * 0.8 - 50, 20, 100, true, 0, 90, 2.2),
+						new Obstacle(w * 0.88 + 60, h * 0.8 - 50, 20, 100, true, 0, -90, 2.2),
+						// 內層上方護盾（較慢且非致命，形成通道）
+						new Obstacle(w * 0.88 - 50, h * 0.8 - 60, 100, 20, false, 80, 0, 1.6),
+						// 中路小障礙增加路徑變化
+						new Obstacle(w/2, h/2, 50, 150, false, 0, 60, 1)
+					  ],
+					  stars: [
+						{ x: w * 0.15, y: h * 0.22 },
+						{ x: w * 0.6,  y: h * 0.5 },
+						{ x: w * 0.9,  y: h * 0.8 - 90 }
+					  ],
+					  ammo: { attract: 3, repel: 3 }
+					},
+					{ // Level 14: Shifting Tunnel（變形隧道） - 模版 D
+					  ball: { x: w * 0.1, y: h * 0.5 },
+					  target: { x: w * 0.9, y: h * 0.5 },
+					  obstacles: (function(){
+						const arr = [];
+						const segments = 6;
+						const segH = h / segments;
+						for(let j=1;j<segments-1;j++){
+						  const gapX = w * 0.2 + Math.random() * w * 0.35;
+						  const gapW = 130;
+						  const speed = 1 + Math.random() * 2;
+						  arr.push(new Obstacle(0, j * segH, gapX, segH - 6, false, 50, 0, speed));
+						  arr.push(new Obstacle(gapX + gapW, j * segH, w - (gapX + gapW), segH - 6, false, -50, 0, speed));
+						  if (Math.random() < 0.4) arr.push(new Obstacle(gapX + gapW/2 - 10, j * segH + 10, 20, 20, true));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.18, y: h * 0.5 },
+						{ x: w * 0.5,  y: h * 0.2 },
+						{ x: w * 0.8,  y: h * 0.8 }
+					  ],
+					  ammo: { attract: 4, repel: 3 }
+					},
+					{ // Level 15: 混合挑戰（中段密集 + 終點護衛）
+					  ball: { x: 100, y: h - 120 },
+					  target: { x: w - 120, y: 100 },
+					  obstacles: [
+						// 中段一排小致命方塊
+						new Obstacle(w * 0.35, h * 0.45, 30, 30, true, 0, 80, 1.8),
+						new Obstacle(w * 0.45, h * 0.55, 30, 30, true, 0, -80, 2.2),
+						// 靠近終點的護盾（非致命 + 致命混合）
+						new Obstacle(w - 200, 60, 20, 120, true, 0, 100, 2.6),
+						new Obstacle(w - 80, 60, 100, 20, false, 100, 0, 1.6)
+					  ],
+					  stars: [
+						{ x: w * 0.12, y: h - 120 },
+						{ x: w * 0.5,  y: h * 0.5 - 30 },
+						{ x: w * 0.88, y: 140 }
+					  ],
+					  ammo: { attract: 4, repel: 4 }
+					},
+					{ // Level 16: Twin Crushers — 雙向夾擊（窄縫、移動速度較快）
+					  ball:   { x: w * 0.08, y: h * 0.35 },
+					  target: { x: w * 0.92, y: h * 0.65 },
+					  obstacles: (function(){
+						const arr = [];
+						// 兩組快速上下夾牆，縫隙較小
+						const ox1 = w * 0.35, ox2 = w * 0.6;
+						arr.push(new Obstacle(ox1, 0, 22, h * 0.35 - 10, true, 0, 90, 2.4));
+						arr.push(new Obstacle(ox1, h * 0.35 + 70, 22, h, true, 0, -90, 2.4));
+						arr.push(new Obstacle(ox2, 0, 22, h * 0.4 - 10, true, 0, 110, 2.0));
+						arr.push(new Obstacle(ox2, h * 0.4 + 60, 22, h, true, 0, -110, 2.0));
+						// 中段幾個小致命塊增加路徑壓力
+						arr.push(new Obstacle(w * 0.47, h * 0.5, 24, 24, true, 0, 60, 1.8));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.35 },
+						{ x: w * 0.5,  y: h * 0.45 },
+						{ x: w * 0.82, y: h * 0.62 }
+					  ],
+					  ammo: { attract: 4, repel: 3 }
+					},
+					{ // Level 17: Dense Minefield — 高密度雷區（小致命塊 + 交錯移動）
+					  ball:   { x: w * 0.08, y: h * 0.65 },
+					  target: { x: w * 0.92, y: h * 0.35 },
+					  obstacles: (function(){
+						const arr = [];
+						const rows = 5, cols = 6;
+						for (let r=0; r<rows; r++){
+						  for (let c=0; c<cols; c++){
+							const ox = w * 0.2 + c * (w * 0.6 / cols) + (r%2?8:-8);
+							const oy = h * 0.15 + r * (h * 0.65 / rows);
+							const moveX = (c % 2 === 0) ? 30 : -30;
+							const speed = 1.6 + (r * 0.2);
+							arr.push(new Obstacle(ox, oy, 18, 18, true, moveX, 0, speed));
+						  }
+						}
+						// 留一條較窄通道（非致命）作為「技巧通路」
+						arr.push(new Obstacle(w * 0.45, 0, 40, h * 0.2, false, 0, 40, 1.2));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.66 },
+						{ x: w * 0.48, y: h * 0.35 },
+						{ x: w * 0.86, y: h * 0.28 }
+					  ],
+					  ammo: { attract: 5, repel: 3 }
+					},
+					{ // Level 18: Converging Corridors — 收斂走廊（多層狹縫 + 滑動牆）
+					  ball:   { x: w * 0.1, y: h * 0.45 },
+					  target: { x: w * 0.9, y: h * 0.55 },
+					  obstacles: (function(){
+						const arr = [];
+						// 多層水平長條形成逐步收窄走廊
+						const layers = 6;
+						for (let i=1;i<layers;i++){
+						  const oy = (i / layers) * h;
+						  const gap = 70 - i * 6; // 越往後窄一點
+						  const gapX = w * 0.25 + i * 20;
+						  arr.push(new Obstacle(0, oy, gapX, 18, false, 50, 0, 1 + i*0.15));
+						  arr.push(new Obstacle(gapX + gap, oy, w - (gapX + gap), 18, false, -50, 0, 1 + i*0.15));
+						  // 每隔層加一個小致命陷阱
+						  if (i % 2 === 0) arr.push(new Obstacle(gapX + gap/2 - 10, oy + 6, 20, 20, true));
+						}
+						// 終點前加入一個旋轉式護盾（用上下移動矩形模擬旋轉效果）
+						arr.push(new Obstacle(w * 0.88, h * 0.55 - 60, 18, 120, true, 0, 120, 2.6));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.45 },
+						{ x: w * 0.46, y: h * 0.3 },
+						{ x: w * 0.82, y: h * 0.6 }
+					  ],
+					  ammo: { attract: 4, repel: 4 }
+					},
+					{ // Level 19: Timed Gates — 定時閘門（需要走位與節奏感）
+					  ball:   { x: w * 0.08, y: h * 0.2 },
+					  target: { x: w * 0.92, y: h * 0.8 },
+					  obstacles: (function(){
+						const arr = [];
+						// 三組周期性上下門，速率不同，形成節奏挑戰
+						const oxBase = w * 0.35;
+						for (let k=0;k<3;k++){
+						  const ox = oxBase + k * w * 0.18;
+						  const openingY = h * (0.25 + k * 0.15);
+						  const openingSize = 90 - k * 12;
+						  const speed = 1.8 + k * 0.6;
+						  const moveRange = 80 + k * 40;
+						  arr.push(new Obstacle(ox, 0, 20, openingY, true, 0, moveRange, speed));
+						  arr.push(new Obstacle(ox, openingY + openingSize, 20, h, true, 0, -moveRange, speed));
+						}
+						// 中段放一個推擠障礙（非致命）增加反彈路徑
+						arr.push(new Obstacle(w * 0.55, h * 0.45, 60, 20, false, 0, 80, 1.2));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.22 },
+						{ x: w * 0.5,  y: h * 0.44 },
+						{ x: w * 0.9,  y: h * 0.78 - 30 }
+					  ],
+					  ammo: { attract: 5, repel: 4 }
+					},
+					{ // Level 20: Elite Gauntlet — 精英試煉（綜合前面元素、窄距與高節奏）
+					  ball:   { x: 120, y: h - 140 },
+					  target: { x: w - 120, y: 120 },
+					  obstacles: (function(){
+						const arr = [];
+						// 前段密集移動方塊（致命）
+						for (let i=0;i<6;i++){
+						  const ox = w * 0.25 + i * 40;
+						  const oy = h * 0.55 + (i%2?40:-40);
+						  arr.push(new Obstacle(ox, oy, 26, 26, true, (i%2?40:-40), 0, 2.0));
+						}
+						// 中段窄隧道 + 閘門交錯
+						arr.push(new Obstacle(w * 0.45, h * 0.3, 120, 18, false, 0, 60, 1.6));
+						arr.push(new Obstacle(w * 0.65, h * 0.6, 120, 18, false, 0, -60, 1.6));
+						// 終點高壓護盾（左右上下混合移動）
+						arr.push(new Obstacle(w - 200, 50, 18, 120, true, 0, 120, 3.0));
+						arr.push(new Obstacle(w - 100, 30, 120, 18, true, 100, 0, 2.2));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: 160,            y: h - 120 },
+						{ x: w * 0.5,        y: h * 0.45 },
+						{ x: w - 160,        y: 160 }
+					  ],
+					  ammo: { attract: 5, repel: 5 }
+					},
+					{ // Level 21：Pulse Rings — 脈衝環（環狀/交錯移動 + 狹縫）
+					  ball:   { x: 120, y: h * 0.3 },
+					  target: { x: w - 120, y: h * 0.7 },
+					  obstacles: (function(){
+						const arr = [];
+						// 兩排左右交錯的移動長條，形成穿透節奏
+						for (let i=0;i<5;i++){
+						  const oy = h * (0.15 + i * 0.14);
+						  const widthLeft = 180 - i*12;
+						  const widthRight = 180 - i*12;
+						  const speed = 1.8 + i*0.25;
+						  // 左側塊（非致命）形成通道邊緣
+						  arr.push(new Obstacle(0, oy, widthLeft, 16, false, 50, 0, speed));
+						  // 右側塊（致命）製造壓力
+						  arr.push(new Obstacle(w - widthRight, oy, widthRight, 16, true, -50, 0, speed+0.4));
+						  // 每兩層放一個小致命方塊增加險度
+						  if (i % 2 === 0) arr.push(new Obstacle(w * 0.42, oy + 10, 20, 20, true, 0, 40, speed*0.9));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: 160,            y: h * 0.28 },   // 起點附近
+						{ x: w * 0.5,        y: h * 0.45 },   // 中段技巧星
+						{ x: w - 160,        y: h * 0.68 }    // 終點前難拿
+					  ],
+					  ammo: { attract: 5, repel: 4 }
+					},
+					{ // Level 22：Saw Corridor — 鋸齒通道（快速小塊 + 高頻移動）
+					  ball:   { x: w * 0.08, y: h * 0.55 },
+					  target: { x: w * 0.92, y: h * 0.45 },
+					  obstacles: (function(){
+						const arr = [];
+						// 多列快速小致命塊，間距緊密，速度偏高
+						const rows = 6, cols = 8;
+						for (let r=0;r<rows;r++){
+						  for (let c=0;c<cols;c++){
+							const ox = w * 0.18 + c * (w * 0.64 / cols) + ((r%2)?6:-6);
+							const oy = h * 0.08 + r * (h * 0.8 / rows);
+							const mv = (c % 2 === 0) ? 30 : -30;
+							const sp = 2.0 + (r*0.12) + (c*0.03);
+							arr.push(new Obstacle(ox, oy, 16, 16, true, mv, 0, sp));
+						  }
+						}
+						// 給玩家一條極窄但穩定的不致命通道（風險／技巧取捨）
+						arr.push(new Obstacle(w * 0.46, 0, 36, h * 0.15, false, 0, 30, 1.0));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.56 },
+						{ x: w * 0.5,  y: h * 0.35 },
+						{ x: w * 0.85, y: h * 0.46 }
+					  ],
+					  ammo: { attract: 6, repel: 4 }
+					},
+					{ // Level 23：Mirror Maze — 鏡像迷宮（左右對稱 + 偽裝陷阱）
+					  ball:   { x: w * 0.12, y: cy },
+					  target: { x: w * 0.88, y: cy },
+					  obstacles: (function(){
+						const arr = [];
+						// 左右對稱的窄牆與小陷阱，玩家需要在中線穿梭
+						const bands = 4;
+						for (let b=0;b<bands;b++){
+						  const oy = h * (0.15 + b * 0.18);
+						  const leftW = 120 - b*10;
+						  const rightX = w - leftW;
+						  arr.push(new Obstacle(0, oy, leftW, 18, false, 40, 0, 1.2 + b*0.2));
+						  arr.push(new Obstacle(rightX, oy, leftW, 18, false, -40, 0, 1.2 + b*0.2));
+						  // 對稱放置致命小塊作為假安全地帶的陷阱
+						  if (b !== 1) {
+							arr.push(new Obstacle(leftW + 60, oy + 6, 20, 20, true, 0, 50, 1.6));
+							arr.push(new Obstacle(rightX - 80, oy + 6, 20, 20, true, 0, -50, 1.6));
+						  }
+						}
+						// 中央再加一個穿透式長條，需配速跳過
+						arr.push(new Obstacle(w * 0.45, cy - 40, w * 0.1, 18, false, 0, 80, 1.8));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.18, y: cy - 60 },
+						{ x: w * 0.5,  y: cy + 10 },
+						{ x: w * 0.82, y: cy + 60 }
+					  ],
+					  ammo: { attract: 5, repel: 5 }
+					},
+					{ // Level 24：Magnet Chaos — 磁場混沌（結合可通過但會改變運動軌跡的長條）
+					  ball:   { x: w * 0.1, y: h * 0.2 },
+					  target: { x: w * 0.9, y: h * 0.8 },
+					  obstacles: (function(){
+						const arr = [];
+						// 這裡用非致命長條(可當作「磁場」區域)，加上周邊致命塊，迫使玩家利用井改向
+						for (let i=0;i<4;i++){
+						  const oy = h * (0.25 + i * 0.18);
+						  arr.push(new Obstacle(w * 0.2, oy, w * 0.6, 22, false, 0, (i%2?40:-40), 1.0 + i*0.25));
+						  // 在磁場邊緣放致命小塊加強風險
+						  arr.push(new Obstacle(w * 0.18, oy + 26, 18, 18, true, 0, 60, 1.4));
+						  arr.push(new Obstacle(w * 0.82, oy - 26, 18, 18, true, 0, -60, 1.4));
+						}
+						// 中段放一個寬但緩慢移動的致命矩形作為動態障礙
+						arr.push(new Obstacle(w * 0.55, h * 0.5, 60, 30, true, 0, 90, 1.4));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.22 },
+						{ x: w * 0.5,  y: h * 0.5 },
+						{ x: w * 0.88, y: h * 0.78 }
+					  ],
+					  // 因為這關鼓勵用井來操控軌跡，給玩家較多吸引/斥力彈
+					  ammo: { attract: 6, repel: 6 }
+					},
+					{ // Level 25：Ultimate Trial — 終極試煉（綜合前面元素、節奏與狹隘空間，高容錯需求）
+					
+					  ball:   { x: 140, y: h - 160 },
+					  target: { x: w - 140, y: 140 },
+					  obstacles: (function(){
+						const arr = [];
+						// 前段：快速交錯致命陣列（壓縮通道）
+						for (let i=0;i<7;i++){
+						  const ox = w * 0.22 + i * 40;
+						  const oy = h * 0.55 + ((i%2)?60:-60);
+						  arr.push(new Obstacle(ox, oy, 24, 24, true, (i%2?45:-45), 0, 2.2));
+						}
+						// 中段：窄隧 + 定時閘門
+						arr.push(new Obstacle(w * 0.45, h * 0.32, 100, 18, false, 0, 60, 1.6));
+						arr.push(new Obstacle(w * 0.6, h * 0.6, 100, 18, false, 0, -60, 1.8));
+						// 終點：高頻護盾與對稱致命塊，要求同時控制多點
+						arr.push(new Obstacle(w - 240, 40, 18, 140, true, 0, 120, 3.2));
+						arr.push(new Obstacle(w - 120, 20, 160, 18, true, 120, 0, 2.6));
+						// 加幾個混合小塊製造路徑變化
+						arr.push(new Obstacle(w * 0.5, h * 0.45, 36, 20, false, 0, 80, 1.3));
+						arr.push(new Obstacle(w * 0.35, h * 0.6, 22, 22, true, 0, -70, 1.9));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: 180,        y: h - 140 },
+						{ x: w * 0.5,    y: h * 0.46 },
+						{ x: w - 180,    y: 180 }
+					  ],
+					  // 給比較多彈藥，因為關卡需要多次嘗試不同策略
+					  ammo: { attract: 6, repel: 6 }
+					},
+					{ // Level 26：Pulse Fortress II — 脈衝要塞（密集護盾 + 移動雷區）
+					  // 起點偏上、終點偏下，前段要穿過雷區，終點被移動護盾包圍
+					  ball: { x: w * 0.12, y: h * 0.18 },
+					  target: { x: w * 0.88, y: h * 0.82 },
+					  obstacles: (function(){
+						const arr = [];
+						// 流動雷區（小致命塊，高密度）
+						for (let i=0;i<14;i++){
+						  const ox = w * 0.22 + Math.random() * w * 0.56;
+						  const oy = h * 0.18 + Math.random() * h * 0.64;
+						  const mvX = Math.random() > 0.5 ? (30 + Math.random()*60) : 0;
+						  const mvY = mvX === 0 ? (30 + Math.random()*60) : 0;
+						  const sp = 1.8 + Math.random() * 1.6;
+						  arr.push(new Obstacle(ox, oy, 16, 16, true, mvX, mvY, sp));
+						}
+						// 終點護盾群（左右上下混合移動）
+						arr.push(new Obstacle(w - 200, h - 140, 18, 120, true, 0, 120, 2.8));
+						arr.push(new Obstacle(w - 120, h - 160, 140, 18, true, 100, 0, 2.0));
+						arr.push(new Obstacle(w - 160, h - 80, 40, 18, false, 0, 80, 1.4)); // 通道提示（非致命）
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.15, y: h * 0.2 },
+						{ x: w * 0.5,  y: h * 0.48 },
+						{ x: w * 0.82, y: h * 0.78 }
+					  ],
+					  ammo: { attract: 6, repel: 6 }
+					},
+					{ // Level 27：Split Orbit — 分裂軌道（交錯橢圓運動 + 狹縫）
+					  // 左右兩列「橢圓軌道」式移動方塊，會在特定區域形成暫時死角
+					  ball: { x: w * 0.08, y: h * 0.6 },
+					  target: { x: w * 0.92, y: h * 0.4 },
+					  obstacles: (function(){
+						const arr = [];
+						// 左側軌道群（用水平+垂直移動模擬橢圓）
+						for (let i=0;i<5;i++){
+						  const ox = w * 0.22 + i * 30;
+						  const oy = h * 0.2 + i * 40;
+						  arr.push(new Obstacle(ox, oy, 22, 22, true, 40, 24 + i*4, 2.0 + i*0.12));
+						}
+						// 右側軌道群（方向相反）
+						for (let i=0;i<5;i++){
+						  const ox = w * 0.56 + i * 30;
+						  const oy = h * 0.3 + (4-i) * 36;
+						  arr.push(new Obstacle(ox, oy, 22, 22, true, -40, -20 - i*3, 1.9 + i*0.15));
+						}
+						// 中段窄縫（非致命）需精準走位
+						arr.push(new Obstacle(w * 0.45, h * 0.45, w * 0.12, 18, false, 0, 80, 1.6));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.62 },
+						{ x: w * 0.5,  y: h * 0.46 },
+						{ x: w * 0.86, y: h * 0.38 }
+					  ],
+					  ammo: { attract: 6, repel: 5 }
+					},
+					{ // Level 28：Echo Chambers — 回聲室（多層收斂 + 反彈/誘導陷阱）
+					  // 多層收斂通道，加上幾個會把球推回的非致命長條，產生路徑迷惑
+					  ball: { x: w * 0.1, y: h * 0.4 },
+					  target: { x: w * 0.9, y: h * 0.6 },
+					  obstacles: (function(){
+						const arr = [];
+						// 逐層收斂（高程度精準）
+						for (let i=0;i<6;i++){
+						  const oy = h * (0.12 + i * 0.14);
+						  const gapX = w * 0.25 + i * 18;
+						  const gapW = 80 - i*6; // 逐層收窄
+						  arr.push(new Obstacle(0, oy, gapX, 18, false, 50, 0, 1 + i*0.25));
+						  arr.push(new Obstacle(gapX + gapW, oy, w - (gapX + gapW), 18, false, -50, 0, 1 + i*0.25));
+						  // 每層放一個會反彈球的非致命塊（模擬「回聲」）
+						  arr.push(new Obstacle(gapX + gapW/2 - 12, oy + 20, 24, 12, false, 0, 60 + i*6, 1.2 + i*0.08));
+						  if (i % 2 === 0) arr.push(new Obstacle(gapX - 30, oy + 6, 18, 18, true, 0, 40, 1.6));
+						}
+						// 終點前的高速致命護盾
+						arr.push(new Obstacle(w - 220, h * 0.6 - 80, 18, 140, true, 0, 140, 3.0));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.14, y: h * 0.38 },
+						{ x: w * 0.48, y: h * 0.5 },
+						{ x: w * 0.86, y: h * 0.58 }
+					  ],
+					  ammo: { attract: 6, repel: 6 }
+					},
+					{ // Level 29：Rhythm Crusher — 節奏粉碎（高速定時閘門 + 移動致命）
+					  // 需要玩家抓節奏與步伐，容錯小但給較多彈藥鼓勵嘗試
+					  ball: { x: w * 0.08, y: h * 0.18 },
+					  target: { x: w * 0.92, y: h * 0.82 },
+					  obstacles: (function(){
+						const arr = [];
+						const baseX = w * 0.32;
+						// 五組高頻定時閘門，頻率漸快
+						for (let k=0;k<5;k++){
+						  const ox = baseX + k * w * 0.1;
+						  const openingY = h * (0.2 + k * 0.12);
+						  const openingSize = 70 - k * 8;
+						  const speed = 2.0 + k * 0.6;
+						  const moveRange = 90 + k * 20;
+						  arr.push(new Obstacle(ox, 0, 20, openingY, true, 0, moveRange, speed));
+						  arr.push(new Obstacle(ox, openingY + openingSize, 20, h, true, 0, -moveRange, speed));
+						}
+						// 中段快速致命橫列，要求同時注意上下節奏
+						for (let i=0;i<4;i++){
+						  arr.push(new Obstacle(w * 0.45 + i*40, h * 0.5 + ((i%2)?30:-30), 22, 22, true, 0, 60 + i*6, 2.2));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.2 },
+						{ x: w * 0.5,  y: h * 0.5 },
+						{ x: w * 0.88, y: h * 0.8 }
+					  ],
+					  ammo: { attract: 7, repel: 6 }
+					},
+					{ // Level 30：Ascendant Apex — 登峰造極（綜合終章：窄隧、節奏、密集致命，高壓測試）
+					  // 設計成你目前前 29 關元素的綜合挑戰 — 請務必給玩家多次嘗試空間（較多彈藥）
+					  ball: { x: 160, y: h - 180 },
+					  target: { x: w - 160, y: 160 },
+					  obstacles: (function(){
+						const arr = [];
+						// 前段：快速交錯致命陣列（更密集）
+						for (let i=0;i<8;i++){
+						  const ox = w * 0.22 + i * 36;
+						  const oy = h * 0.56 + ((i%2)?72:-72);
+						  arr.push(new Obstacle(ox, oy, 26, 26, true, (i%2?50:-50), 0, 2.4));
+						}
+						// 中段：窄隧 + 定時閘門交錯
+						arr.push(new Obstacle(w * 0.45, h * 0.32, 110, 18, false, 0, 70, 1.8));
+						arr.push(new Obstacle(w * 0.62, h * 0.62, 110, 18, false, 0, -80, 1.9));
+						// 三層終點護衛：左右上下混合移動 + 中央致命塊
+						arr.push(new Obstacle(w - 260, 40, 18, 140, true, 0, 140, 3.4));
+						arr.push(new Obstacle(w - 140, 30, 160, 18, true, 140, 0, 2.8));
+						arr.push(new Obstacle(w - 200, 120, 30, 30, true, 0, -90, 2.2));
+						// 幾個混合非致命塊，增加引導與誤導
+						arr.push(new Obstacle(w * 0.5, h * 0.44, 40, 18, false, 0, 90, 1.4));
+						arr.push(new Obstacle(w * 0.34, h * 0.62, 22, 22, true, 0, -80, 2.0));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: 220,        y: h - 160 },
+						{ x: w * 0.5,    y: h * 0.46 },
+						{ x: w - 220,    y: 200 }
+					  ],
+					  // 要求玩家在許多嘗試中找到穩定路徑 -> 多彈藥支持探索
+					  ammo: { attract: 8, repel: 8 }
+					},
+					{ // Level 31: Rotating Gauntlet III（旋轉鬥陣 III - 高頻小塊 + 交錯通道）
+					  ball: { x: w * 0.08, y: h * 0.5 },
+					  target: { x: w * 0.92, y: h * 0.5 },
+					  obstacles: (function(){
+						const arr = [];
+						const cols = 14;
+						for (let i = 0; i < cols; i++) {
+						  const ox = w * 0.18 + i * ((w * 0.64) / cols);
+						  const oy = h * (0.38 + (i % 3) * 0.06);
+						  const mvX = (i % 2 === 0) ? 30 + (i % 5) * 4 : -30 - (i % 5) * 4;
+						  const mvY = (i % 3 === 0) ? 0 : (i % 3 === 1) ? 18 : -18;
+						  const speed = 1.8 + (i * 0.08);
+						  // 小致命塊，間距緊，速度偏高
+						  arr.push(new Obstacle(ox, oy, 18, 18, true, mvX, mvY, speed));
+						  // 偶爾放一個非致命長條作為通路邊緣
+						  if (i % 4 === 0) arr.push(new Obstacle(ox, oy - 60, 40, 14, false, mvX * 0.6, 0, speed * 0.6));
+						}
+						// 在起點附近放兩個慢速保護條（可作為暫時避難點）
+						arr.push(new Obstacle(w * 0.12, h * 0.5 - 60, 120, 18, false, 0, 30, 0.9));
+						arr.push(new Obstacle(w * 0.12, h * 0.5 + 60, 120, 18, false, 0, -30, 1.0));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.14, y: h * 0.44 },
+						{ x: w * 0.5,  y: h * 0.5  },
+						{ x: w * 0.86, y: h * 0.56 }
+					  ],
+					  ammo: { attract: 6, repel: 5 }
+					},
+					{ // Level 32: Orbital Singularity（環狀漩渦 - 放射性 oscillation + 窄安全帶）
+					  ball:   { x: w * 0.1, y: h * 0.2 },
+					  target: { x: w * 0.9, y: h * 0.8 },
+					  obstacles: (function(){
+						const arr = [];
+						const centerX = w * 0.5, centerY = h * 0.5;
+						const rings = 3;
+						for (let r = 0; r < rings; r++) {
+						  const pieces = 10 + r * 4;
+						  const radius = 80 + r * 70;
+						  for (let p = 0; p < pieces; p++) {
+							const angle = (p / pieces) * Math.PI * 2;
+							const ox = centerX + Math.cos(angle) * radius;
+							const oy = centerY + Math.sin(angle) * radius;
+							// 讓每個障礙沿放射方向來回（moveVec 是放射向量）
+							const mvx = Math.cos(angle) * (30 + r * 10);
+							const mvy = Math.sin(angle) * (30 + r * 10);
+							const speed = 1.6 + r * 0.6 + (p % 3) * 0.12;
+							const isDeadly = (r > 0) || (p % 3 === 0);
+							arr.push(new Obstacle(ox, oy, 18, 18, isDeadly, mvx, mvy, speed));
+						  }
+						}
+						// 留一條非常窄的「安全通道」靠近上方（非致命），但通道會被環狀運動逼縮
+						arr.push(new Obstacle(w * 0.42, h * 0.06, w * 0.16, 18, false, 0, 40, 1.4));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.18 },
+						{ x: w * 0.5,  y: h * 0.5  },
+						{ x: w * 0.88, y: h * 0.82 }
+					  ],
+					  ammo: { attract: 6, repel: 6 }
+					},
+					{ // Level 33: Collapse Corridor（收縮通道 - 漸進式收窄 + 定時閘門）
+					  ball:   { x: w * 0.08, y: h * 0.5 },
+					  target: { x: w * 0.92, y: h * 0.5 },
+					  obstacles: (function(){
+						const arr = [];
+						const segments = 8;
+						for (let i = 0; i < segments; i++) {
+						  const topY = (i / segments) * h + 20;
+						  const segH = h / segments - 10;
+						  // 左右牆向中心收縮，moveRange 隨段數變大（越往中間收縮越強）
+						  const gap = 220 - i * 18; // 初期大，越往後窄
+						  const gapX = w * 0.2 + i * 18;
+						  const speed = 1.2 + i * 0.25;
+						  arr.push(new Obstacle(0, topY, gapX, segH, false, 50 + i*6, 0, speed));
+						  arr.push(new Obstacle(gapX + gap, topY, w - (gapX + gap), segH, false, -50 - i*6, 0, speed));
+						  // 每隔兩段放一個小致命塊增加壓力
+						  if (i % 2 === 1) arr.push(new Obstacle(gapX + gap/2 - 10, topY + segH/2, 20, 20, true, 0, 40 + i*4, speed*1.1));
+						}
+						// 終點前放一個高速致命護盾
+						arr.push(new Obstacle(w - 220, h * 0.5 - 80, 18, 160, true, 0, 160, 3.4));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.14, y: h * 0.48 },
+						{ x: w * 0.45, y: h * 0.36 },
+						{ x: w * 0.88, y: h * 0.52 }
+					  ],
+					  ammo: { attract: 7, repel: 6 }
+					},
+					{ // Level 34: Mirror Flux（鏡像波動 - 對稱反相移動 + 交錯致命）
+					  ball:   { x: w * 0.1, y: h * 0.35 },
+					  target: { x: w * 0.9, y: h * 0.65 },
+					  obstacles: (function(){
+						const arr = [];
+						const lanes = 6;
+						for (let i = 0; i < lanes; i++) {
+						  const oy = h * (0.12 + i * 0.13);
+						  const leftW = 120 - i*8;
+						  const rightX = w - leftW;
+						  // 左右對稱：左側向右移，右側向左移（反相）
+						  const speed = 1.6 + i*0.18;
+						  arr.push(new Obstacle(0, oy, leftW, 18, false, 40 + i*8, 0, speed));
+						  arr.push(new Obstacle(rightX, oy, leftW, 18, true, -40 - i*8, 0, speed + 0.3));
+						  // 在中間放幾個小致命柱形成假通道
+						  if (i !== 2) arr.push(new Obstacle(w * 0.45 + (i%2?14:-14), oy + 8, 20, 20, true, 0, 60 - i*4, speed*1.05));
+						}
+						// 橫向旋轉感（上下移動的長條）在終點前製造節奏感
+						arr.push(new Obstacle(w * 0.7, h * 0.6 - 60, 140, 18, false, 0, 90, 1.8));
+						arr.push(new Obstacle(w * 0.82, h * 0.6 - 20, 30, 30, true, 0, 80, 2.6));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.34 },
+						{ x: w * 0.5,  y: h * 0.47 },
+						{ x: w * 0.86, y: h * 0.68 }
+					  ],
+					  ammo: { attract: 6, repel: 6 }
+					},
+					{ // Level 35: Apex — Temporal Gauntlet（終極：時間鬥陣 - 高速 + 定時 + 狹縫）
+					  ball:   { x: 120, y: h - 140 },
+					  target: { x: w - 120, y: 140 },
+					  obstacles: (function(){
+						const arr = [];
+						// 前段：快速交錯小致命塊（高頻）
+						for (let i = 0; i < 8; i++) {
+						  const ox = w * 0.26 + i * 42;
+						  const oy = h * 0.58 + ((i % 2) ? 48 : -48);
+						  arr.push(new Obstacle(ox, oy, 22, 22, true, (i%2?50:-50), 0, 2.6));
+						}
+						// 中段：窄隧 + 多組定時閘門（快速節奏）
+						const baseX = w * 0.48;
+						for (let k = 0; k < 4; k++) {
+						  const ox = baseX + k * 80;
+						  const openingY = h * (0.28 + k * 0.08);
+						  const openingSize = 64 - k * 8;
+						  const speed = 2.2 + k * 0.4;
+						  const moveRange = 80 + k * 20;
+						  arr.push(new Obstacle(ox, 0, 20, openingY, true, 0, moveRange, speed));
+						  arr.push(new Obstacle(ox, openingY + openingSize, 20, h, true, 0, -moveRange, speed));
+						}
+						// 終點前的高頻護盾與左右守衛（難取星）
+						arr.push(new Obstacle(w - 220, 40, 18, 160, true, 0, 140, 3.6));
+						arr.push(new Obstacle(w - 120, 30, 120, 18, false, 120, 0, 2.4));
+						// 幾個混合小塊增加路徑變化
+						arr.push(new Obstacle(w * 0.52, h * 0.45, 36, 20, false, 0, 90, 1.6));
+						arr.push(new Obstacle(w * 0.36, h * 0.62, 22, 22, true, 0, -80, 2.2));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: 180,        y: h - 140 },
+						{ x: w * 0.5,    y: h * 0.46 },
+						{ x: w - 180,    y: 180 }
+					  ],
+					  // 給大量彈藥讓玩家試多種策略
+					  ammo: { attract: 8, repel: 8 }
+					},
+					{ // Level 36: Temporal Gauntlet II — 時空鬥陣 II（更快、更窄、同步閘門）
+					  ball:   { x: w * 0.08, y: h * 0.2 },
+					  target: { x: w * 0.92, y: h * 0.8 },
+					  obstacles: (function(){
+						const arr = [];
+						const groups = 5;
+						const baseX = w * 0.28;
+						for (let g = 0; g < groups; g++) {
+						  const ox = baseX + g * (w * 0.12);
+						  const openingSize = 60 - g * 6;            // 往後更窄
+						  const openingY = h * (0.22 + g * 0.12);
+						  const speed = 2.2 + g * 0.45;              // 速度更快
+						  const moveRange = 100 + g * 30;
+						  // 上下兩片致命門，配合快速同相移動（形成節奏）
+						  arr.push(new Obstacle(ox, 0, 18, openingY, true, 0, moveRange, speed));
+						  arr.push(new Obstacle(ox, openingY + openingSize, 18, h, true, 0, -moveRange, speed));
+						  // 每組放一個小非致命引導條 (增加誤導)
+						  arr.push(new Obstacle(ox + 40, openingY + openingSize/2, 40, 12, false, 0, moveRange * 0.6, speed * 0.7));
+						}
+						// 中段密集致命橫列，加快頻率
+						for (let i = 0; i < 6; i++) {
+						  arr.push(new Obstacle(w * 0.45 + i * 36, h * 0.52 + ((i % 2) ? 36 : -36), 20, 20, true, 0, 80 + i*6, 2.6));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.18 },
+						{ x: w * 0.5,  y: h * 0.48 },
+						{ x: w * 0.88, y: h * 0.78 }
+					  ],
+					  ammo: { attract: 7, repel: 7 }
+					},
+					{ // Level 37: Pulse Nexus — 脈衝核心（環形/徑向移動，高密度死角）
+					  ball:   { x: w * 0.12, y: h * 0.12 },
+					  target: { x: w * 0.88, y: h * 0.88 },
+					  obstacles: (function(){
+						const arr = [];
+						const centerX = w * 0.5, centerY = h * 0.5;
+						const rings = 4;
+						for (let r = 0; r < rings; r++) {
+						  const pieces = 12 + r * 6;                 // 每圈越多
+						  const radius = 60 + r * 60;
+						  for (let p = 0; p < pieces; p++) {
+							const angle = (p / pieces) * Math.PI * 2;
+							const ox = centerX + Math.cos(angle) * radius;
+							const oy = centerY + Math.sin(angle) * radius;
+							// 放射向量使障礙沿徑向來回移動（形成動態死角）
+							const mvx = Math.cos(angle) * (40 + r * 12);
+							const mvy = Math.sin(angle) * (40 + r * 12);
+							const sp = 1.8 + r * 0.6 + (p % 3) * 0.08;
+							const deadly = (r > 0) || (p % 4 !== 0);  // 內圈較多安全塊，外圈幾乎致命
+							arr.push(new Obstacle(ox, oy, 16, 16, deadly, mvx, mvy, sp));
+						  }
+						}
+						// 微幅給玩家一條上方窄通道（非致命）
+						arr.push(new Obstacle(w * 0.42, h * 0.06, w * 0.16, 14, false, 0, 40, 1.4));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.14, y: h * 0.14 },
+						{ x: w * 0.5,  y: h * 0.5  },
+						{ x: w * 0.86, y: h * 0.86 }
+					  ],
+					  ammo: { attract: 8, repel: 6 }
+					},
+					{ // Level 38: Precision Orbit — 精準軌道（極窄安全帶 + 高速小塊）
+					  ball:   { x: w * 0.08, y: h * 0.5 },
+					  target: { x: w * 0.92, y: h * 0.5 },
+					  obstacles: (function(){
+						const arr = [];
+						// 緊密小塊矩陣，交錯移動造成微幅通道
+						const cols = 12, rows = 4;
+						const spacingX = (w * 0.66) / cols;
+						const spacingY = (h * 0.4) / rows;
+						for (let c = 0; c < cols; c++) {
+						  for (let r = 0; r < rows; r++) {
+							const ox = w * 0.18 + c * spacingX + ((r % 2) ? 8 : -8);
+							const oy = h * 0.22 + r * spacingY;
+							const mvX = (c % 2 === 0) ? 28 + (r*2) : -28 - (r*2);
+							const mvY = (r % 2 === 0) ? 12 : -12;
+							const sp = 2.2 + (c * 0.04) + (r * 0.08);
+							// 多數致命，但每隔一個做成非致命以留技巧路徑
+							const deadly = !((c + r) % 7 === 0);
+							arr.push(new Obstacle(ox, oy, 14, 14, deadly, mvX, mvY, sp));
+						  }
+						}
+						// 起終點附近給兩個慢速保護條，供暫避
+						arr.push(new Obstacle(w * 0.12, h * 0.5 - 64, 120, 14, false, 0, 28, 0.9));
+						arr.push(new Obstacle(w * 0.12, h * 0.5 + 64, 120, 14, false, 0, -28, 1.0));
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.12, y: h * 0.48 },
+						{ x: w * 0.5,  y: h * 0.44 },
+						{ x: w * 0.88, y: h * 0.52 }
+					  ],
+					  ammo: { attract: 9, repel: 8 }
+					},
+					{ // Level 39: Chaos Mirror — 混沌鏡像（左右對稱＋速度突變的致命陷阱）
+					  ball:   { x: w * 0.12, y: h * 0.3 },
+					  target: { x: w * 0.88, y: h * 0.7 },
+					  obstacles: (function(){
+						const arr = [];
+						const lanes = 7;
+						for (let i = 0; i < lanes; i++) {
+						  const oy = h * (0.14 + i * 0.11);
+						  const width = 110 - i * 6;
+						  const speed = 1.6 + i * 0.35;
+						  // 左右對稱：左側非致命、右側致命，但隨時間速度會突增（可在 Obstacle.update 加 phase）
+						  arr.push(new Obstacle(0, oy, width, 16, false, 40 + i*6, 0, speed));
+						  arr.push(new Obstacle(w - width, oy, width, 16, true, -40 - i*6, 0, speed * 1.15));
+						  // 中央放小致命柱並給它上下移動（造成誤判）
+						  arr.push(new Obstacle(w * 0.45 + ((i%2)?12:-12), oy + 8, 18, 18, true, 0, 60 + i*8, speed * 1.05));
+						}
+						// 近終點加入一排快速小塊（高頻移動）
+						for (let k = 0; k < 6; k++) {
+						  arr.push(new Obstacle(w * 0.62 + k * 30, h * 0.68 + ((k % 2) ? 28 : -28), 16, 16, true, 0, 90, 2.6 + k*0.08));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: w * 0.14, y: h * 0.28 },
+						{ x: w * 0.5,  y: h * 0.45 },
+						{ x: w * 0.84, y: h * 0.66 }
+					  ],
+					  ammo: { attract: 8, repel: 8 }
+					},
+					{ // Level 40: Ascendant Apex II — 終極 II（終章：多系統混合 + 高密度致命）
+					  ball:   { x: 140, y: h - 160 },
+					  target: { x: w - 140, y: 160 },
+					  obstacles: (function(){
+						const arr = [];
+						// 前段：快速交錯致命陣列（更密集、更快）
+						for (let i=0;i<10;i++){
+						  const ox = w * 0.22 + i * 34;
+						  const oy = h * 0.56 + ((i%2)?84:-84);
+						  arr.push(new Obstacle(ox, oy, 26, 26, true, (i%2?60:-60), 0, 2.6));
+						}
+						// 中段：窄隧 + 秒表型閘門（頻率高）
+						arr.push(new Obstacle(w * 0.45, h * 0.32, 110, 18, false, 0, 84, 1.9));
+						arr.push(new Obstacle(w * 0.62, h * 0.62, 110, 18, false, 0, -88, 2.0));
+						// 終點三層防線：混合左右上下高速致命護盾
+						arr.push(new Obstacle(w - 280, 40, 18, 160, true, 0, 160, 3.6));
+						arr.push(new Obstacle(w - 160, 20, 160, 18, true, 160, 0, 3.0));
+						arr.push(new Obstacle(w - 220, 120, 28, 28, true, 0, -100, 2.6));
+						// 幾個混合非致命塊，給策略空間（偏慢）
+						arr.push(new Obstacle(w * 0.5, h * 0.44, 46, 18, false, 0, 100, 1.4));
+						arr.push(new Obstacle(w * 0.34, h * 0.62, 26, 26, true, 0, -90, 2.1));
+						// 中段放幾個環形小塊增加路徑噪音
+						for (let j=0;j<5;j++) {
+						  arr.push(new Obstacle(w * 0.38 + j*48, h * 0.5 + ((j%2)?32:-32), 18, 18, true, (j%2?44:-44), 0, 2.0 + j*0.12));
+						}
+						return arr;
+					  })(),
+					  stars: [
+						{ x: 180,        y: h - 140 },
+						{ x: w * 0.5,    y: h * 0.46 },
+						{ x: w - 180,    y: 180 }
+					  ],
+					  ammo: { attract: 10, repel: 10 }
+					},
+					{ // Level 41 (例：窄道 + 一對蟲洞)
+						ball: { x: hardStartX, y: h * 0.85 },
+						target: { x: hardEndX, y: h * 0.15 },
+						obstacles: [
+						  new Obstacle(w*0.25, h*0.25, w*0.5, 16, false), // 長窄板
+						  new Obstacle(w*0.45, h*0.45, 12, h*0.3, true)    // 死區牆
+						],
+						stars: [{x: w*0.3, y:h*0.7}, {x: w*0.6, y:h*0.5}, {x: w*0.8, y:h*0.25}],
+						ammo: { attract: 2, repel: 1 },
+						wormholes: [ {x: w*0.35,y:h*0.78, exitX:w*0.75, exitY:h*0.22}, {x:w*0.75,y:h*0.22, exitX:w*0.35, exitY:h*0.78} ]
+					  },
+					{ // Level 42 (例：移動障礙 + 雙入口蟲洞)
+						ball: { x: hardStartX, y: h*0.5 },
+						target: { x: hardEndX, y: h*0.5 },
+						obstacles: [
+						  new Obstacle(w*0.35, h*0.2, 20, 120, false, 0, 40, 2), // 垂直移動
+						  new Obstacle(w*0.6, h*0.6, 200, 20, true, 80, 0, 3)
+						],
+						stars: [{x:w*0.55,y:h*0.15},{x:w*0.45,y:h*0.85},{x:w*0.8,y:h*0.5}],
+						ammo: { attract: 1, repel: 1 },
+						wormholes: [
+						  {x:w*0.4,y:h*0.15, exitX:w*0.8, exitY:h*0.5},
+						  {x:w*0.8,y:h*0.5, exitX:w*0.4, exitY:h*0.15}
+						]
+					  },
+					{ // Level 43 (例：迷宮式死區 + 蟲洞作為捷徑)
+						ball: { x: w*0.08, y: h*0.12 },
+						target: { x: w*0.92, y: h*0.88 },
+						obstacles: [
+						  new Obstacle(w*0.2, h*0.1, 16, h*0.7, true),
+						  new Obstacle(w*0.35, h*0.3, w*0.3, 12, true)
+						],
+						stars: [{x:w*0.15,y:h*0.25},{x:w*0.5,y:h*0.5},{x:w*0.85,y:h*0.75}],
+						ammo: { attract: 2, repel: 0 },
+						wormholes: [{x:w*0.25,y:h*0.85, exitX:w*0.8, exitY:h*0.2}]
+					  },
+					{ // Level 44
+						ball: { x: w*0.07, y: h*0.9 },
+						target: { x: w*0.93, y: h*0.4 },
+						obstacles: [
+						  new Obstacle(w*0.38, h*0.5, w*0.45, 12, true),
+						  new Obstacle(w*0.5, 0, 12, h*0.45, true)
+						],
+						stars: [{x:w*0.25,y:h*0.65},{x:w*0.6,y:h*0.3},{x:w*0.78,y:h*0.55}],
+						ammo: { attract: 1, repel: 2 },
+						wormholes: [{x:w*0.2,y:h*0.7, exitX:w*0.7, exitY:h*0.28}, {x:w*0.7,y:h*0.28, exitX:w*0.2, exitY:h*0.7}]
+					  },
+					{ // Level 45 (高危險 + 小彈藥)
+						ball: { x: w*0.1, y: h*0.5 },
+						target: { x: w*0.9, y: h*0.1 },
+						obstacles: [
+						  new Obstacle(w*0.2, h*0.35, w*0.6, 12, true),
+						  new Obstacle(w*0.5, h*0.6, 12, h*0.25, true)
+						],
+						stars: [{x:w*0.3,y:h*0.45},{x:w*0.55,y:h*0.2},{x:w*0.8,y:h*0.12}],
+						ammo: { attract: 1, repel: 0 },
+						wormholes: [{x:w*0.6,y:h*0.66, exitX:w*0.75, exitY:h*0.15}]
+					  },
+					{ // Level 46 (穿越多直線障礙 + 雙蟲洞)
+						ball: { x: w*0.08, y: h*0.2 },
+						target: { x: w*0.92, y: h*0.8 },
+						obstacles: [
+						  new Obstacle(w*0.2, h*0.35, w*0.6, 8, false),
+						  new Obstacle(w*0.2, h*0.55, w*0.6, 8, true)
+						],
+						stars: [{x:w*0.15,y:h*0.45},{x:w*0.5,y:h*0.6},{x:w*0.85,y:h*0.75}],
+						ammo: { attract: 2, repel: 1 },
+						wormholes: [
+						  {x:w*0.48,y:h*0.28, exitX:w*0.84, exitY:h*0.72},
+						  {x:w*0.84,y:h*0.72, exitX:w*0.48, exitY:h*0.28}
+						]
+					  },
+					{ // Level 47 (動態死區 + 蟲洞做瞬移)
+						ball: { x: w*0.05, y: h*0.5 },
+						target: { x: w*0.95, y: h*0.5 },
+						obstacles: [
+						  new Obstacle(w*0.45, h*0.1, 12, h*0.6, true, 0, 120, 1.6),
+						  new Obstacle(w*0.2, h*0.4, 150, 12, false, 50, 0, 2)
+						],
+						stars: [{x:w*0.3,y:h*0.25},{x:w*0.6,y:h*0.45},{x:w*0.75,y:h*0.75}],
+						ammo: { attract: 1, repel: 2 },
+						wormholes: [{x:w*0.3,y:h*0.6, exitX:w*0.7, exitY:h*0.2}]
+					  },
+					{ // Level 48 (精準角度 + 蟲洞出口帶角度變換)
+						ball: { x: w*0.08, y: h*0.82 },
+						target: { x: w*0.9, y: h*0.18 },
+						obstacles: [
+						  new Obstacle(w*0.35, h*0.35, 12, h*0.4, true),
+						  new Obstacle(w*0.6, h*0.15, 12, h*0.4, false)
+						],
+						stars: [{x:w*0.2,y:h*0.7},{x:w*0.5,y:h*0.45},{x:w*0.78,y:h*0.3}],
+						ammo: { attract: 1, repel: 1 },
+						wormholes: [{x:w*0.42,y:h*0.78, exitX:w*0.58, exitY:h*0.25}]
+					  },
+					{ // Level 49 (少彈藥+長距離蟲洞)
+						ball: { x: w*0.07, y: h*0.12 },
+						target: { x: w*0.93, y: h*0.9 },
+						obstacles: [
+						  new Obstacle(w*0.3, h*0.35, 12, h*0.4, true),
+						  new Obstacle(w*0.52, h*0.55, 12, h*0.28, false)
+						],
+						stars: [{x:w*0.18,y:h*0.25},{x:w*0.5,y:h*0.6},{x:w*0.86,y:h*0.8}],
+						ammo: { attract: 1, repel: 0 },
+						wormholes: [{x:w*0.15,y:h*0.3, exitX:w*0.85, exitY:h*0.75}]
+					  },
+					{ // Level 50 (最難：連續陷阱 + 雙對蟲洞 + 幾乎沒彈藥)
+						ball: { x: w*0.05, y: h*0.9 },
+						target: { x: w*0.95, y: h*0.1 },
+						obstacles: [
+						  new Obstacle(w*0.15, h*0.6, w*0.7, 10, true),
+						  new Obstacle(w*0.35, h*0.2, 12, h*0.35, true)
+						],
+						stars: [{x:w*0.2,y:h*0.8},{x:w*0.5,y:h*0.55},{x:w*0.8,y:h*0.25}],
+						ammo: { attract: 0, repel: 1 },
+						wormholes: [
+						  {x:w*0.22,y:h*0.82, exitX:w*0.78, exitY:h*0.28},
+						  {x:w*0.78,y:h*0.28, exitX:w*0.22, exitY:h*0.82}
+						]
+					  },
+					{ // Level 51 — Twin Worm Gauntlet（雙蟲洞迷宮 + 高速小塊）
+						ball:   { x: w * 0.08, y: h * 0.85 },
+						target: { x: w * 0.92, y: h * 0.15 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 高速小致命塊陣列（前段密集）
+						  for (let i=0;i<8;i++){
+							arr.push(new Obstacle(w * 0.22 + i * 40, h * 0.55 + ((i%2)?44:-44), 20, 20, true, (i%2?50:-50), 0, 2.4));
+						  }
+						  // 中段窄條做成非致命誘導
+						  arr.push(new Obstacle(w * 0.45, h * 0.3, 120, 18, false, 0, 60, 1.6));
+						  return arr;
+						})(),
+						stars: [{x: w*0.14, y: h*0.78},{x: w*0.5, y: h*0.5},{x: w*0.86, y: h*0.22}],
+						ammo: { attract: 4, repel: 3 },
+						// 雙向蟲洞成為捷徑（互為出口）
+						wormholes: [
+						  { x: w*0.28, y: h*0.72, exitX: w*0.72, exitY: h*0.28 },
+						  { x: w*0.72, y: h*0.28, exitX: w*0.28, exitY: h*0.72 }
+						]
+					  },
+					{ // Level 52 — Temporal Split (快速節奏 + 閘門 + 蟲洞)
+						ball: { x: 140, y: h - 160 },
+						target: { x: w - 140, y: 160 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 三組快速上下閘門
+						  const baseX = w * 0.36;
+						  for (let k=0;k<3;k++){
+							const ox = baseX + k * w * 0.14;
+							const openingY = h * (0.2 + k * 0.12);
+							const openingSize = 78 - k*8;
+							const speed = 2.2 + k * 0.6;
+							arr.push(new Obstacle(ox, 0, 18, openingY, true, 0, 80 + k*20, speed));
+							arr.push(new Obstacle(ox, openingY + openingSize, 18, h, true, 0, -(80 + k*20), speed));
+						  }
+						  // 終段小非致命引導
+						  arr.push(new Obstacle(w * 0.6, h * 0.45, 100, 18, false, 0, 60, 1.4));
+						  return arr;
+						})(),
+						stars: [{x: w*0.18, y: h*0.72},{x: w*0.5, y: h*0.46},{x: w*0.82, y: h*0.24}],
+						ammo: { attract: 6, repel: 5 },
+						wormholes: [{ x: w*0.25, y: h*0.85, exitX: w*0.78, exitY: h*0.18 }]
+					  },
+					{ // Level 53 — Mirror Shift (對稱迷宮 + 反相移動)
+						ball: { x: w*0.1, y: cy },
+						target: { x: w*0.9, y: cy },
+						obstacles: (function(){
+						  const arr = [];
+						  const lanes = 6;
+						  for (let i=0;i<lanes;i++){
+							const oy = h * (0.12 + i * 0.13);
+							const leftW = 120 - i * 8;
+							const rightX = w - leftW;
+							const speed = 1.8 + i*0.18;
+							arr.push(new Obstacle(0, oy, leftW, 18, false, 40 + i*8, 0, speed));
+							arr.push(new Obstacle(rightX, oy, leftW, 18, true, -40 - i*8, 0, speed + 0.3));
+							if (i !== 2) arr.push(new Obstacle(w * 0.45 + (i%2?14:-14), oy + 8, 20, 20, true, 0, 60 - i*4, speed*1.05));
+						  }
+						  return arr;
+						})(),
+						stars: [{x:w*0.12,y:h*0.24},{x:w*0.5,y:h*0.5},{x:w*0.88,y:h*0.76}],
+						ammo: { attract: 5, repel: 5 },
+						// no wormhole — 以空間與節奏作難度
+					  },
+					{ // Level 54 — Constrictor (收縮通道 + 交錯致命)
+						ball: { x: w * 0.08, y: h * 0.5 },
+						target: { x: w * 0.92, y: h * 0.5 },
+						obstacles: (function(){
+						  const arr = [];
+						  const segments = 8;
+						  for (let i = 0; i < segments; i++) {
+							const topY = (i / segments) * h + 20;
+							const segH = h / segments - 10;
+							const gap = 220 - i * 18;
+							const gapX = w * 0.2 + i * 18;
+							const speed = 1.2 + i * 0.25;
+							arr.push(new Obstacle(0, topY, gapX, segH, false, 50 + i*6, 0, speed));
+							arr.push(new Obstacle(gapX + gap, topY, w - (gapX + gap), segH, false, -50 - i*6, 0, speed));
+							if (i % 2 === 1) arr.push(new Obstacle(gapX + gap/2 - 10, topY + segH/2, 20, 20, true, 0, 40 + i*4, speed*1.1));
+						  }
+						  arr.push(new Obstacle(w - 220, h * 0.5 - 80, 18, 160, true, 0, 160, 3.4));
+						  return arr;
+						})(),
+						stars: [{x:w*0.14,y:h*0.48},{x:w*0.45,y:h*0.36},{x:w*0.88,y:h*0.52}],
+						ammo: { attract: 7, repel: 6 }
+					  },
+					{ // Level 55 — Echo Field (回聲室 + 反彈陷阱 + 單向蟲洞)
+						ball: { x: w * 0.1, y: h * 0.4 },
+						target: { x: w * 0.9, y: h * 0.6 },
+						obstacles: (function(){
+						  const arr = [];
+						  for (let i=0;i<6;i++){
+							const oy = h * (0.12 + i * 0.14);
+							const gapX = w * 0.25 + i * 18;
+							const gapW = 80 - i*6;
+							arr.push(new Obstacle(0, oy, gapX, 18, false, 50, 0, 1 + i*0.25));
+							arr.push(new Obstacle(gapX + gapW, oy, w - (gapX + gapW), 18, false, -50, 0, 1 + i*0.25));
+							arr.push(new Obstacle(gapX + gapW/2 - 12, oy + 20, 24, 12, false, 0, 60 + i*6, 1.2 + i*0.08));
+							if (i % 2 === 0) arr.push(new Obstacle(gapX - 30, oy + 6, 18, 18, true, 0, 40, 1.6));
+						  }
+						  arr.push(new Obstacle(w - 220, h * 0.6 - 80, 18, 140, true, 0, 140, 3.0));
+						  return arr;
+						})(),
+						stars: [{x:w*0.14,y:h*0.38},{x:w*0.48,y:h*0.5},{x:w*0.86,y:h*0.58}],
+						ammo: { attract: 6, repel: 6 },
+						wormholes: [{ x: w*0.28, y: h*0.56, exitX: w*0.75, exitY: h*0.22 }]  // 單向捷徑
+					  },
+					{ // Level 56 — Split Orbit II（分裂軌道 + 多出口蟲洞）
+						ball: { x: w * 0.08, y: h * 0.6 },
+						target: { x: w * 0.92, y: h * 0.4 },
+						obstacles: (function(){
+						  const arr = [];
+						  for (let i=0;i<5;i++){
+							const ox = w * 0.22 + i * 30;
+							const oy = h * 0.2 + i * 40;
+							arr.push(new Obstacle(ox, oy, 22, 22, true, 40, 24 + i*4, 2.0 + i*0.12));
+						  }
+						  for (let i=0;i<5;i++){
+							const ox = w * 0.56 + i * 30;
+							const oy = h * 0.3 + (4-i) * 36;
+							arr.push(new Obstacle(ox, oy, 22, 22, true, -40, -20 - i*3, 1.9 + i*0.15));
+						  }
+						  arr.push(new Obstacle(w * 0.45, h * 0.45, w * 0.12, 18, false, 0, 80, 1.6));
+						  return arr;
+						})(),
+						stars: [{x:w*0.12,y:h*0.62},{x:w*0.5,y:h*0.46},{x:w*0.86,y:h*0.38}],
+						ammo: { attract: 6, repel: 5 },
+						wormholes: [  // 多個出口，要小心使用
+						  { x: w*0.3, exitX: w*0.7, y: h*0.65, exitY: h*0.25 },
+						  { x: w*0.7, y: h*0.25, exitX: w*0.3, exitY: h*0.65 }
+						]
+					  },
+					{ // Level 57 — Razor Rhythm（節奏 + 微窄通道 + 跳躍蟲洞）
+						ball: { x: w * 0.08, y: h * 0.18 },
+						target: { x: w * 0.92, y: h * 0.82 },
+						obstacles: (function(){
+						  const arr = [];
+						  const baseX = w * 0.32;
+						  for (let k=0;k<5;k++){
+							const ox = baseX + k * w * 0.1;
+							const openingY = h * (0.2 + k * 0.12);
+							const openingSize = 70 - k * 8;
+							const speed = 2.0 + k * 0.6;
+							const moveRange = 90 + k * 20;
+							arr.push(new Obstacle(ox, 0, 20, openingY, true, 0, moveRange, speed));
+							arr.push(new Obstacle(ox, openingY + openingSize, 20, h, true, 0, -moveRange, speed));
+						  }
+						  for (let i=0;i<4;i++){
+							arr.push(new Obstacle(w * 0.45 + i*40, h * 0.5 + ((i%2)?30:-30), 22, 22, true, 0, 60 + i*6, 2.2));
+						  }
+						  return arr;
+						})(),
+						stars: [{x:w*0.12,y:h*0.2},{x:w*0.5,y:h*0.5},{x:w*0.88,y:h*0.8}],
+						ammo: { attract: 7, repel: 6 },
+						wormholes: [{ x: w*0.22, y: h*0.18, exitX: w*0.78, exitY: h*0.82 }]
+					  },
+					{ // Level 58 — Orbital Singularity II（環狀漩渦 + 放射移動致命塊）
+						ball: { x: w * 0.1, y: h * 0.2 },
+						target: { x: w * 0.9, y: h * 0.8 },
+						obstacles: (function(){
+						  const arr = [];
+						  const centerX = w * 0.5, centerY = h * 0.5;
+						  const rings = 3;
+						  for (let r = 0; r < rings; r++) {
+							const pieces = 10 + r * 4;
+							const radius = 80 + r * 70;
+							for (let p = 0; p < pieces; p++){
+							  const angle = (p / pieces) * Math.PI * 2;
+							  const ox = centerX + Math.cos(angle) * radius;
+							  const oy = centerY + Math.sin(angle) * radius;
+							  const mvx = Math.cos(angle) * (30 + r * 10);
+							  const mvy = Math.sin(angle) * (30 + r * 10);
+							  const sp = 1.6 + r * 0.6 + (p % 3) * 0.12;
+							  const deadly = (r > 0) || (p % 3 === 0);
+							  arr.push(new Obstacle(ox, oy, 18, 18, deadly, mvx, mvy, sp));
+							}
+						  }
+						  arr.push(new Obstacle(w * 0.42, h * 0.06, w * 0.16, 18, false, 0, 40, 1.4));
+						  return arr;
+						})(),
+						stars: [{x:w*0.12,y:h*0.18},{x:w*0.5,y:h*0.5},{x:w*0.88,y:h*0.82}],
+						ammo: { attract: 6, repel: 6 }
+					  },
+					{ // Level 59 — Temporal Apex（終極時間鬥陣 — 多系統結合 + 雙蟲洞）
+						ball: { x: 120, y: h - 140 },
+						target: { x: w - 120, y: 140 },
+						obstacles: (function(){
+						  const arr = [];
+						  for (let i = 0; i < 8; i++){
+							arr.push(new Obstacle(w * 0.22 + i * 36, h * 0.56 + ((i%2)?72:-72), 26, 26, true, (i%2?50:-50), 0, 2.6));
+						  }
+						  arr.push(new Obstacle(w * 0.45, h * 0.32, 110, 18, false, 0, 70, 1.8));
+						  arr.push(new Obstacle(w * 0.62, h * 0.62, 110, 18, false, 0, -80, 1.9));
+						  arr.push(new Obstacle(w - 260, 40, 18, 140, true, 0, 140, 3.4));
+						  arr.push(new Obstacle(w - 140, 30, 160, 18, true, 140, 0, 2.8));
+						  return arr;
+						})(),
+						stars: [{x:180,y:h-140},{x:w*0.5,y:h*0.46},{x:w-180,y:180}],
+						ammo: { attract: 8, repel: 8 },
+						wormholes: [
+						  { x: w*0.3, y: h*0.7, exitX: w*0.72, exitY: h*0.22 },
+						  { x: w*0.72, y: h*0.22, exitX: w*0.3, exitY: h*0.7 }
+						]
+					  },	  
+					{ // Level 60 — Ascendant Apex III（終極極限：狹隘 + 高頻 + 幾乎無彈藥 + 雙對蟲洞）
+						ball: { x: 160, y: h - 180 },
+						target: { x: w - 160, y: 160 },
+						obstacles: (function(){
+						  const arr = [];
+						  for (let i=0;i<10;i++){
+							arr.push(new Obstacle(w * 0.22 + i * 34, h * 0.56 + ((i%2)?84:-84), 26, 26, true, (i%2?60:-60), 0, 2.6));
+						  }
+						  arr.push(new Obstacle(w * 0.45, h * 0.32, 110, 18, false, 0, 84, 1.9));
+						  arr.push(new Obstacle(w * 0.62, h * 0.62, 110, 18, false, 0, -88, 2.0));
+						  arr.push(new Obstacle(w - 280, 40, 18, 160, true, 0, 160, 3.6));
+						  arr.push(new Obstacle(w - 160, 20, 160, 18, true, 160, 0, 3.0));
+						  return arr;
+						})(),
+						stars: [{ x: 180, y: h - 160 }, { x: w * 0.5, y: h * 0.46 }, { x: w - 220, y: 200 }],
+						ammo: { attract: 6, repel: 4 }, // 較少彈藥，逼迫巧用蟲洞
+						wormholes: [
+						  { x: w*0.28, y: h*0.78, exitX: w*0.72, exitY: h*0.22 },
+						  { x: w*0.72, y: h*0.22, exitX: w*0.28, exitY: h*0.78 }
+						]
+					  },
+					{ // Level 61 — Spiral Vortex（旋渦環 + 中心引力井）
+						ball: { x: w*0.12, y: h*0.85 },
+						target: { x: w*0.88, y: h*0.12 },
+						// 3 個同心旋轉環（用多個小塊模擬環）
+						obstacles: (function(){
+						  const arr = [];
+						  const cx = w*0.5, cy = h*0.5;
+						  for (let r=0;r<3;r++){
+							const pieces = 12 + r*6;
+							const radius = 80 + r*40;
+							for (let p=0;p<pieces;p++){
+							  const angle = (p/pieces)*Math.PI*2;
+							  const ox = cx + Math.cos(angle)*radius;
+							  const oy = cy + Math.sin(angle)*radius;
+							  const mvx = -Math.sin(angle)*(20 + r*8); // 移動做切向擺動
+							  const mvy = Math.cos(angle)*(20 + r*8);
+							  const sp = 1.2 + r*0.18 + (p%3)*0.05;
+							  arr.push(new Obstacle(ox, oy, 18, 18, (r>0), mvx, mvy, sp));
+							}
+						  }
+						  // 中心放一個非致命但會吸球的"井"（用 well 機制，如果你有）
+						  return arr;
+						})(),
+						stars: [{x:w*0.18,y:h*0.78},{x:w*0.5,y:h*0.5},{x:w*0.82,y:h*0.22}],
+						ammo: { attract: 5, repel: 2 },
+						wormholes: [
+						  { x: w*0.35, y: h*0.72, exitX: w*0.75, exitY: h*0.28 },
+						  { x: w*0.75, y: h*0.28, exitX: w*0.35, exitY: h*0.72 }
+						]
+					  },
+					{ // Level 62 — Conveyor Labyrinth（單向流 + 推擠帶 + 單向蟲洞）
+						ball: { x: w*0.08, y: h*0.5 },
+						target: { x: w*0.92, y: h*0.5 },
+						// 模擬「輸送帶」：多個非致命長條以不同方向有穩定速度（移動向量模擬推）
+						obstacles: (function(){
+						  const arr = [];
+						  // 三個水平輸送帶，推向不同方向
+						  arr.push(new Obstacle(w*0.18, h*0.25, w*0.6, 18, false, 40, 0, 1.0));
+						  arr.push(new Obstacle(w*0.18, h*0.5,  w*0.6, 18, false, -40, 0, 1.0));
+						  arr.push(new Obstacle(w*0.18, h*0.75, w*0.6, 18, false, 60, 0, 1.2));
+						  // 中段增加幾個小致命塊
+						  for (let i=0;i<4;i++) arr.push(new Obstacle(w*0.45+i*50, h*0.5 + ((i%2)?40:-40), 20, 20, true, 0, 60, 1.6));
+						  return arr;
+						})(),
+						stars: [{x:w*0.12,y:h*0.48},{x:w*0.5,y:h*0.32},{x:w*0.82,y:h*0.68}],
+						ammo: { attract: 4, repel: 2 },
+						wormholes: [
+						  // 單向蟲洞（進入口） — 設計上入口只有一邊，出口沒有對應入口
+						  { x: w*0.4, y: h*0.78, exitX: w*0.82, exitY: h*0.22, oneWay: true }
+						]
+					  },
+					{ // Level 63 — Phase Shift（相位切換陷阱：障礙會在固定週期切換致命/非致命）
+						ball: { x: w*0.1, y: h*0.85 },
+						target: { x: w*0.9, y: h*0.15 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 6 組會切換相位的門（你可在 Obstacle class 加 phase 屬性）
+						  for (let i=0;i<6;i++){
+							arr.push(new Obstacle(w*0.2 + i*60, h*0.3 + ((i%2)?90:-90), 18, 90, (i%3===0), 0, 60, 1.4));
+							// 假定 Obstacle 裡可接受 .phaseOffset 與 .phasePeriod
+							arr[arr.length-1].phaseOffset = i * 12;
+							arr[arr.length-1].phasePeriod = 120; // 2 秒切換（若 60fps）
+						  }
+						  // 幾個普通障礙增加混亂
+						  arr.push(new Obstacle(w*0.58, h*0.55, 120, 18, false, 0, 80, 1.0));
+						  return arr;
+						})(),
+						stars: [{x:w*0.16,y:h*0.78},{x:w*0.48,y:h*0.5},{x:w*0.82,y:h*0.22}],
+						ammo: { attract: 6, repel: 4 },
+						wormholes: [
+						  // 蟲洞會改變球的速度倍率（在傳送時乘 speedMult）
+						  { x: w*0.3, y: h*0.7, exitX: w*0.7, exitY: h*0.3, speedMult: 1.4 }
+						]
+					  },
+					{ // Level 64 — One-Way Maze（迷宮 + 單向多出口序列）
+						ball: { x: w*0.08, y: h*0.92 },
+						target: { x: w*0.92, y: h*0.08 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 長通道分支形成迷宮（玩家需走對方向）
+						  arr.push(new Obstacle(w*0.18, h*0.2, w*0.6, 18, false, 0, 40, 0.8));
+						  arr.push(new Obstacle(w*0.18, h*0.4, w*0.6, 18, false, 0, -40, 0.9));
+						  arr.push(new Obstacle(w*0.18, h*0.6, w*0.6, 18, false, 0, 60, 1.0));
+						  // 加幾個致命阻隔
+						  arr.push(new Obstacle(w*0.5, h*0.5, 20, 20, true));
+						  arr.push(new Obstacle(w*0.7, h*0.35, 20, 20, true));
+						  return arr;
+						})(),
+						stars: [{x:w*0.12,y:h*0.88},{x:w*0.44,y:h*0.52},{x:w*0.82,y:h*0.18}],
+						ammo: { attract: 3, repel: 1 },
+						wormholes: [
+						  // 多個「單向」蟲洞，共同形成迷宮捷徑（必須按順序使用）
+						  { x: w*0.25, y: h*0.85, exitX: w*0.5, exitY: h*0.45, id: 'A' },
+						  { x: w*0.5,  y: h*0.45, exitX: w*0.75, exitY: h*0.15, id: 'B' }
+						]
+					  },
+					{ // Level 65 — Echo Loop（反射回聲 + 出口角度改變）
+						ball: { x: w*0.12, y: h*0.78 },
+						target: { x: w*0.88, y: h*0.22 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 長條做成可反射通道，搭配幾個小致命柱
+						  for (let i=0;i<5;i++){
+							arr.push(new Obstacle(w*0.18 + i*90, h*0.45 + ((i%2)?60:-60), 60, 12, false, 0, 60, 0.9));
+							if (i%2==0) arr.push(new Obstacle(w*0.25 + i*90, h*0.45, 18, 18, true, 0, 40, 1.2));
+						  }
+						  return arr;
+						})(),
+						stars: [{x:w*0.16,y:h*0.72},{x:w*0.5,y:h*0.44},{x:w*0.84,y:h*0.26}],
+						ammo: { attract: 4, repel: 3 },
+						wormholes: [
+						  // 出口會旋轉球的速度向量（exitAngleDelta）
+						  { x: w*0.28, y: h*0.6, exitX: w*0.7, exitY: h*0.28, exitAngleDelta: Math.PI/6 }
+						]
+					  },
+					{ // Level 66 — Magnetic Flux（磁場帶 + 複合蟲洞）
+						ball: { x: w*0.1, y: h*0.15 },
+						target: { x: w*0.9, y: h*0.85 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 交錯非致命長條模擬磁帶，周邊放致命塊
+						  for (let i=0;i<6;i++){
+							arr.push(new Obstacle(0, h*(0.12+i*0.14), w*0.36, 16, false, 50, 0, 1.0 + i*0.08));
+							arr.push(new Obstacle(w - w*0.36, h*(0.12+i*0.14), w*0.36, 16, true, -50, 0, 1.0 + i*0.08));
+						  }
+						  // 中段致命小塊群
+						  for (let j=0;j<5;j++) arr.push(new Obstacle(w*0.45 + j*30, h*0.5 + ((j%2)?30:-30), 18, 18, true, 0, 60, 1.2));
+						  return arr;
+						})(),
+						stars: [{x:w*0.14,y:h*0.18},{x:w*0.5,y:h*0.5},{x:w*0.86,y:h*0.82}],
+						ammo: { attract: 6, repel: 5 },
+						wormholes: [
+						  // 複合蟲洞：其中一個出口送到多個可能位置（在 Wormhole logic 用 array 或 random）
+						  { x: w*0.28, y: h*0.24, exitCandidates: [{x:w*0.72,y:h*0.72},{x:w*0.78,y:h*0.4}] }
+						]
+					  },
+					{ // Level 67 — Time Dilation（慢速區域 + 加速蟲洞）
+						ball: { x: w*0.08, y: h*0.2 },
+						target: { x: w*0.92, y: h*0.8 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 在畫面中段放一大片「慢速場」（用非致命長條表示）
+						  arr.push(new Obstacle(w*0.25, h*0.3, w*0.5, h*0.4, false, 0, 0, 0));
+						  // 兩側放致命阻擋
+						  arr.push(new Obstacle(w*0.2, h*0.25, 22, 120, true));
+						  arr.push(new Obstacle(w*0.8, h*0.55, 22, 120, true));
+						  return arr;
+						})(),
+						// 當球進 slow zone 時，你可以在物理更新裡降低 ball.vel.mult(0.6)
+						stars: [{x:w*0.12,y:h*0.18},{x:w*0.48,y:h*0.5},{x:w*0.84,y:h*0.82}],
+						ammo: { attract: 5, repel: 3 },
+						wormholes: [
+						  // 這些蟲洞在傳送時會把速度放大（speedMult）
+						  { x: w*0.3, y: h*0.25, exitX: w*0.72, exitY: h*0.75, speedMult: 1.8 }
+						]
+					  },
+					{ // Level 68 — Mirror Labyrinth（鏡像迷宮 + 非線性通路）
+						ball: { x: w*0.12, y: h*0.5 },
+						target: { x: w*0.88, y: h*0.5 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 左右對稱密集長條與小致命柱
+						  for (let i=0;i<7;i++){
+							const oy = h*(0.12 + i*0.12);
+							const leftW = 130 - i*8;
+							const rightX = w - leftW;
+							arr.push(new Obstacle(0, oy, leftW, 18, false, 40 + i*6, 0, 1.1 + i*0.12));
+							arr.push(new Obstacle(rightX, oy, leftW, 18, true , -40 - i*6, 0, 1.1 + i*0.12));
+							if (i%2===0) arr.push(new Obstacle(w*0.45 + (i%3?12:-12), oy + 8, 18, 18, true, 0, 40 + i*6, 1.1 + i*0.1));
+						  }
+						  return arr;
+						})(),
+						stars: [{x:w*0.14,y:h*0.44},{x:w*0.5,y:h*0.5},{x:w*0.86,y:h*0.56}],
+						ammo: { attract: 6, repel: 6 },
+						wormholes: [
+						  // 這個關卡的蟲洞出口會微幅改變角速度（可用 exitAngleDelta）
+						  { x: w*0.25, y: h*0.3, exitX: w*0.75, exitY: h*0.7, exitAngleDelta: -Math.PI/10 }
+						]
+					  },
+					{ // Level 69 — Random Mines（隨機觸發雷區 + 多重出口蟲洞）
+						ball: { x: w*0.07, y: h*0.12 },
+						target: { x: w*0.93, y: h*0.9 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 多個小塊但每個在 load 時有概率為致命（需要 Obstacle 支援 .active 判定）
+						  for (let i=0;i<16;i++){
+							const ox = w*0.2 + (i%4)*120 + (Math.random()*20-10);
+							const oy = h*0.18 + Math.floor(i/4)*110 + (Math.random()*20-10);
+							const isDead = Math.random() < 0.6;
+							arr.push(new Obstacle(ox, oy, 18, 18, isDead));
+						  }
+						  return arr;
+						})(),
+						stars: [{x:w*0.18,y:h*0.25},{x:w*0.5,y:h*0.6},{x:w*0.86,y:h*0.8}],
+						ammo: { attract: 3, repel: 2 },
+						wormholes: [
+						  // 多重出口：傳送時隨機挑一個 exitCandidate
+						  { x: w*0.17, y: h*0.3, exitCandidates: [{x:w*0.6,y:h*0.8},{x:w*0.82,y:h*0.5},{x:w*0.72,y:h*0.2}] }
+						]
+					  },
+					{ // Level 70 — Chain Gauntlet（蟲洞鏈：必須按順序通過的多節傳送）
+						ball: { x: 160, y: h - 180 },
+						target: { x: w - 160, y: 160 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 前段高速小塊夾擊
+						  for (let i=0;i<8;i++) arr.push(new Obstacle(w*0.22 + i*36, h*0.56 + ((i%2)?72:-72), 24, 24, true, (i%2?50:-50), 0, 2.6));
+						  // 中段窄隧
+						  arr.push(new Obstacle(w*0.45, h*0.3, 110, 18, false, 0, 70, 1.8));
+						  return arr;
+						})(),
+						stars: [{x:180,y:h-140},{x:w*0.5,y:h*0.46},{x:w-180,y:180}],
+						ammo: { attract: 4, repel: 3 }, // 彈藥少，靠順序與技巧
+						wormholes: [
+						  // 蟲洞鏈：A => B => C；若亂用會退回（需在 Wormhole logic 加序列檢查）
+						  { x: w*0.28, y: h*0.78, exitX: w*0.5, exitY: h*0.5, id: 'A' },
+						  { x: w*0.5,  y: h*0.5,  exitX: w*0.72, exitY: h*0.22, id: 'B' },
+						  { x: w*0.72, y: h*0.22, exitX: w*0.88, exitY: h*0.12, id: 'C' }
+						]
+					},
+					{ // 71: 螺旋環帶 + 雙向蟲洞對 (需掌握節奏)
+					  ball: { x: w*0.08, y: h*0.5 },
+					  target: { x: w*0.92, y: h*0.5 },
+					  obstacles: (function(){
+						const arr = [];
+						// 兩圈旋轉小塊形成螺旋通道
+						for (let r=0;r<2;r++){
+						  const pieces = 12 + r*6;
+						  const radius = 80 + r*60;
+						  for (let p=0;p<pieces;p++){
+							const angle = (p / pieces) * Math.PI*2;
+							const ox = w*0.5 + Math.cos(angle)*radius;
+							const oy = h*0.5 + Math.sin(angle)*radius;
+							arr.push(new Obstacle(ox, oy, 18, 18, (p%3===0), Math.cos(angle)*30*(r+1), Math.sin(angle)*30*(r+1), 1.6 + r*0.2));
+						  }
+						}
+						// 一條中路移動盾
+						arr.push(new Obstacle(w*0.45, h*0.5-110, 220, 16, false, 0, 90, 1.2));
+						return arr;
+					  })(),
+					  stars: [{x:w*0.2,y:h*0.5},{x:w*0.5,y:h*0.28},{x:w*0.8,y:h*0.68}],
+					  ammo: { attract: 5, repel: 4 },
+					  wormholes: [
+						{ x: w*0.22, y: h*0.62, exitX: w*0.78, exitY: h*0.38, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.78, y: h*0.38, exitX: w*0.22, exitY: h*0.62, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 72: 時序閘門 + 成對捷徑蟲洞（蟲洞有冷啟動：先到達星星才啟用）
+					  ball: { x: w*0.08, y: h*0.2 },
+					  target: { x: w*0.92, y: h*0.8 },
+					  obstacles: (function(){
+						const arr=[]; // 三組上下對開門（高頻）
+						for (let i=0;i<4;i++){
+						  const ox = w*0.32 + i*w*0.1;
+						  const openingY = h*(0.18 + i*0.12);
+						  arr.push(new Obstacle(ox, 0, 18, openingY, true, 0, 80 + i*20, 1.8 + i*0.3));
+						  arr.push(new Obstacle(ox, openingY+60, 18, h, true, 0, -80 - i*20, 1.8 + i*0.3));
+						}
+						return arr;
+					  })(),
+					  stars: [{x:w*0.12,y:h*0.22},{x:w*0.5,y:h*0.45},{x:w*0.85,y:h*0.72}],
+					  ammo: { attract: 4, repel: 3 },
+					  // 注意：第一個 wormhole 將作為「未啟用」示範，你的關卡邏輯若想支援可加 flag (activatedAfterStars)
+					  wormholes: [
+						{ x: w*0.28, y: h*0.28, exitX: w*0.72, exitY: h*0.68, activatedAfterStars: 1, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.72, y: h*0.68, exitX: w*0.28, exitY: h*0.28, activatedAfterStars: 1, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 73: 鏡像迷宮 + 旋轉護盾 + 雙對蟲洞（鏡像出口）
+					  ball: { x: w*0.12, y: cy },
+					  target: { x: w*0.88, y: cy },
+					  obstacles: (function(){
+						const arr=[];
+						// 左右鏡像窄牆
+						for (let i=0;i<5;i++){
+						  const oy = h*(0.12 + i*0.17);
+						  arr.push(new Obstacle(0, oy, 110 - i*6, 18, false, 40 + i*6, 0, 1.2 + i*0.15));
+						  arr.push(new Obstacle(w - (110 - i*6), oy, 110 - i*6, 18, true, -40 - i*6, 0, 1.2 + i*0.15));
+						}
+						// 中央小陷阱
+						arr.push(new Obstacle(w*0.46, cy-30, 40, 40, true, 0, 60, 1.4));
+						return arr;
+					  })(),
+					  stars: [{x:w*0.18,y:cy-40},{x:w*0.5,y:cy},{x:w*0.82,y:cy+40}],
+					  ammo: { attract: 6, repel: 5 },
+					  wormholes: [
+						// 兩對鏡像蟲洞：左上 ↔ 右下，左下 ↔ 右上（出口保持鏡像位置）
+						{ x: w*0.2, y: h*0.18, exitX: w*0.8, exitY: h*0.82, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.8, y: h*0.82, exitX: w*0.2, exitY: h*0.18, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.2, y: h*0.82, exitX: w*0.8, exitY: h*0.18, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.8, y: h*0.18, exitX: w*0.2, exitY: h*0.82, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 74: 分裂通道（多對蟲洞鏈）— 進入一對會被傳到下一對，形成「蟲洞走廊」
+					  ball: { x: w*0.1, y: h*0.85 },
+					  target: { x: w*0.9, y: h*0.15 },
+					  obstacles: (function(){
+						const arr=[];
+						arr.push(new Obstacle(w*0.3, 0, 20, h*0.5, true, 0, 120, 1.6));
+						arr.push(new Obstacle(w*0.6, h*0.5, 20, h*0.5, true, 0, -120, 1.8));
+						return arr;
+					  })(),
+					  stars: [{x:w*0.15,y:h*0.78},{x:w*0.45,y:h*0.5},{x:w*0.78,y:h*0.22}],
+					  ammo: { attract: 3, repel: 2 },
+					  wormholes: [
+						// 3 對成串：1↔2、3↔4、5↔6；你可以在傳送時實作鏈式行為（例如按順序循環）
+						{ x: w*0.22, y: h*0.78, exitX: w*0.4, exitY: h*0.5, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.4,  y: h*0.5,  exitX: w*0.22, exitY: h*0.78, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						{ x: w*0.48, y: h*0.6,  exitX: w*0.68, exitY: h*0.28, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.68, y: h*0.28, exitX: w*0.48, exitY: h*0.6,  icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						{ x: w*0.75, y: h*0.18, exitX: w*0.88, exitY: h*0.25, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.88, y: h*0.25, exitX: w*0.75, exitY: h*0.18, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 75: 時空分岐（出口可改變速度/角度）— 蟲洞出口附帶速度倍率/角度
+					  ball: { x: w*0.12, y: h*0.88 },
+					  target: { x: w*0.88, y: h*0.12 },
+					  obstacles: (function(){ const a=[]; a.push(new Obstacle(w*0.5, h*0.5-40, 120, 18, false, 0, 80, 1.2)); a.push(new Obstacle(w*0.5-80, h*0.3, 18, 80, true)); return a; })(),
+					  stars: [{x:w*0.18,y:h*0.82},{x:w*0.4,y:h*0.5},{x:w*0.82,y:h*0.18}],
+					  ammo: { attract: 4, repel: 3 },
+					  wormholes: [
+						// 出口帶速度 / 角度變化（你的 teleport code 可讀取 exitAngle、exitVelMul）
+						{ x: w*0.3, y: h*0.78, exitX: w*0.7, exitY: h*0.25, exitAngle: -0.6, exitVelMul: 1.6, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.7, y: h*0.25, exitX: w*0.3, exitY: h*0.78, exitAngle: 0.6, exitVelMul: 0.9,  icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 76: 震盪圈層（蟲洞對在高頻振盪陣列邊緣，運用井把球送入出口）
+					  ball: { x: w*0.08, y: h*0.5 },
+					  target: { x: w*0.92, y: h*0.5 },
+					  obstacles: (function(){
+						const arr=[];
+						for (let i=0;i<8;i++){
+						  const ox = w*0.28 + i*30;
+						  const oy = h*(0.3 + Math.sin(i)*0.06 + 0.1);
+						  arr.push(new Obstacle(ox, oy, 18, 18, true, 0, 60 + i*4, 1.8 + i*0.12));
+						}
+						return arr;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.48},{x:w*0.44,y:h*0.38},{x:w*0.82,y:h*0.55}],
+					  ammo: { attract: 5, repel: 5 },
+					  wormholes: [
+						{ x: w*0.32, y: h*0.28, exitX: w*0.68, exitY: h*0.72, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.68, y: h*0.72, exitX: w*0.32, exitY: h*0.28, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 77: 分裂反射帶（蟲洞在致命牆之間，進入出口須精準角度）
+					  ball: { x: w*0.12, y: h*0.2 },
+					  target: { x: w*0.88, y: h*0.8 },
+					  obstacles: (function(){
+						const arr=[];
+						arr.push(new Obstacle(w*0.2, h*0.3, w*0.6, 12, true));
+						arr.push(new Obstacle(w*0.4, h*0.6, w*0.6, 12, true));
+						return arr;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.17},{x:w*0.5,y:h*0.48},{x:w*0.86,y:h*0.79}],
+					  ammo: { attract: 3, repel: 2 },
+					  wormholes: [
+						{ x: w*0.15, y: h*0.25, exitX: w*0.85, exitY: h*0.75, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.85, y: h*0.75, exitX: w*0.15, exitY: h*0.25, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 78: 時間迷宮（門與蟲洞同步出現，玩家要抓時機穿越）
+					  ball: { x: w*0.08, y: h*0.6 },
+					  target: { x: w*0.92, y: h*0.4 },
+					  obstacles: (function(){
+						const arr=[];
+						for (let i=0;i<6;i++){
+						  arr.push(new Obstacle(w*0.22 + i*40, h*0.2 + (i%2?40:-40), 18, 18, true, 0, 80 + i*5, 2.0 + i*0.1));
+						}
+						return arr;
+					  })(),
+					  stars: [{x:w*0.12,y:h*0.58},{x:w*0.5,y:h*0.4},{x:w*0.86,y:h*0.32}],
+					  ammo: { attract: 6, repel: 5 },
+					  wormholes: [
+						{ x: w*0.34, y: h*0.16, exitX: w*0.68, exitY: h*0.32, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.68, y: h*0.32, exitX: w*0.34, exitY: h*0.16, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 79: 核心脈衝（蟲洞對位於中心區，出口周圍有強場擾動）
+					  ball: { x: w*0.1, y: h*0.1 },
+					  target: { x: w*0.9, y: h*0.9 },
+					  obstacles: (function(){
+						const arr=[];
+						// 中央環狀陷阱
+						for (let p=0;p<10;p++) {
+						  const angle = (p/10)*Math.PI*2;
+						  arr.push(new Obstacle(w*0.5 + Math.cos(angle)*120, h*0.5 + Math.sin(angle)*120, 16, 16, true, Math.cos(angle)*30, Math.sin(angle)*30, 1.6));
+						}
+						return arr;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.12},{x:w*0.5,y:h*0.48},{x:w*0.86,y:h*0.88}],
+					  ammo: { attract: 5, repel: 4 },
+					  wormholes: [
+						// 出口附近有擾動（實作上可在傳送後對球施加小隨機力）
+						{ x: w*0.48, y: h*0.62, exitX: w*0.82, exitY: h*0.32, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.82, y: h*0.32, exitX: w*0.48, exitY: h*0.62, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 80: 終極：多對鏡像 + 变換出口（最難，幾乎沒彈藥，需靠蟲洞策略）
+					  ball: { x: w*0.12, y: h*0.88 },
+					  target: { x: w*0.88, y: h*0.12 },
+					  obstacles: (function(){
+						const arr=[];
+						// 高密度小塊矩陣
+						for (let c=0;c<10;c++){
+						  for (let r=0;r<4;r++){
+							arr.push(new Obstacle(w*0.16 + c*48 + (r%2?6:-6), h*0.18 + r*80, 14, 14, true, (c%2?30:-30), 0, 2.0 + c*0.03));
+						  }
+						}
+						// 終點護盾群
+						arr.push(new Obstacle(w-220, 30, 18, 140, true, 0, 140, 3.4));
+						arr.push(new Obstacle(w-120, 20, 120, 18, true, 120, 0, 2.6));
+						return arr;
+					  })(),
+					  stars: [{x:w*0.18,y:h*0.82},{x:w*0.5,y:h*0.5},{x:w*0.82,y:h*0.18}],
+					  ammo: { attract: 2, repel: 1 },
+					  wormholes: [
+						// 三對鏡像對且出口會隨時間微幅移動（你可在 Wormhole.update 實作）
+						{ x: w*0.24, y: h*0.78, exitX: w*0.76, exitY: h*0.22, exitVelMul: 1.2, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.76, y: h*0.22, exitX: w*0.24, exitY: h*0.78, exitVelMul: 0.85, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						{ x: w*0.14, y: h*0.5,  exitX: w*0.86, exitY: h*0.5,  icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.86, y: h*0.5,  exitX: w*0.14, exitY: h*0.5,  icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						{ x: w*0.5,  y: h*0.12, exitX: w*0.5,  exitY: h*0.88, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x: w*0.5,  y: h*0.88, exitX: w*0.5,  exitY: h*0.12, icon: '/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 81: 連鎖時間窗 + 蟲洞鏈（進入 A 會依順序傳到 B、再到 C，需掌握節奏）
+					  ball: { x: w*0.08, y: h*0.5 },
+					  target: { x: w*0.92, y: h*0.5 },
+					  obstacles: (function(){ const a=[]; for(let i=0;i<6;i++){ a.push(new Obstacle(w*0.2 + i*0.1*w, h*0.3 + (i%2?80:-80), 20, 20, true, 0, 60 + i*10, 2.0)); } return a; })(),
+					  stars: [{x:w*0.18,y:h*0.46},{x:w*0.5,y:h*0.34},{x:w*0.82,y:h*0.54}],
+					  ammo: { attract: 4, repel: 4 },
+					  wormholes: [
+						// 三個節點鏈：A -> B -> C -> A；每次進入會傳到下一個（實作上可用 index 與 cycle）
+						{ id: 'A', x:w*0.28, y:h*0.58, exitId: 'B', chainIndex: 0, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id: 'B', x:w*0.48, y:h*0.36, exitId: 'C', chainIndex: 1, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id: 'C', x:w*0.72, y:h*0.62, exitId: 'A', chainIndex: 2, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 82: 反向磁場 + 單向蟲洞對（只有 A -> B 可用，B->A 禁止；適合用來刪除回流）
+					  ball: { x: w*0.12, y: h*0.2 },
+					  target: { x: w*0.88, y: h*0.8 },
+					  obstacles: [
+						new Obstacle(w*0.4, h*0.0, 18, h*0.45, true, 0, 140, 2.2),
+						new Obstacle(w*0.6, h*0.55, 18, h*0.45, true, 0, -140, 2.2)
+					  ],
+					  stars: [{x:w*0.18,y:h*0.18},{x:w*0.5,y:h*0.48},{x:w*0.82,y:h*0.78}],
+					  ammo: { attract: 3, repel: 2 },
+					  wormholes: [
+						{ x:w*0.28, y:h*0.22, exitX:w*0.72, exitY:h*0.68, oneWay:true, cooldown:1200, // ms
+						  note:'A->B only, 有 cooldown 避免被瞬間迴圈', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x:w*0.72, y:h*0.68, // B 的反向入口標示但不回傳
+						  exitX:w*0.28, exitY:h*0.22, oneWay:false, disabled:true, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 83: 鏡像旋轉陣列 + 動態出口角（蟲洞出口的角度會依時間擺動）
+					  ball: { x: w*0.1, y: h*0.6 },
+					  target: { x: w*0.9, y: h*0.4 },
+					  obstacles: (function(){
+						const a=[]; for(let i=0;i<10;i++){ const ox=w*0.18+i*0.07*w; a.push(new Obstacle(ox, h*0.2 + (i%2?70:-70), 14, 14, true, Math.cos(i)*40, Math.sin(i)*20, 2.0 + i*0.05)); } return a;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.58},{x:w*0.5,y:h*0.44},{x:w*0.82,y:h*0.26}],
+					  ammo: { attract: 5, repel: 5 },
+					  wormholes: [
+						// exitAngle 屬性會隨時間在 -0.6 ~ +0.6 間擺動（實作建議讀取 time 並改變出口角）
+						{ x:w*0.32, y:h*0.3, exitX:w*0.68, exitY:h*0.7, exitAngleOsc: { amp:0.6, speed:0.006 }, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x:w*0.68, y:h*0.7, exitX:w*0.32, exitY:h*0.3, exitAngleOsc: { amp:0.6, speed:0.006 }, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 84: 高頻擾動環 + 蟲洞門同步（只有在特定相位門打開時蟲洞才可用）
+					  ball: { x: w*0.08, y: h*0.12 },
+					  target: { x: w*0.92, y: h*0.88 },
+					  obstacles: (function(){ const a=[]; for(let r=0;r<3;r++){ for(let p=0;p<12;p++){ const ang=(p/12)*Math.PI*2; a.push(new Obstacle(w*0.5+Math.cos(ang)*(80+40*r), h*0.5+Math.sin(ang)*(80+40*r), 14, 14, (p%4===0), Math.cos(ang)*20, Math.sin(ang)*20, 1.6 + r*0.2)); } } return a; })(),
+					  stars: [{x:w*0.12,y:h*0.1},{x:w*0.5,y:h*0.48},{x:w*0.88,y:h*0.9}],
+					  ammo: { attract: 6, repel: 6 },
+					  wormholes: [
+						// activatedPhase 用來表示：只有當全局 phase % N == V 時才可傳送（實作上可用時間或內部 counter）
+						{ x:w*0.26, y:h*0.22, exitX:w*0.74, exitY:h*0.78, activatedPhase:{mod:2400, value:0}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x:w*0.74, y:h*0.78, exitX:w*0.26, exitY:h*0.22, activatedPhase:{mod:2400, value:0}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 85: "鏡面折返" + 限時雙向蟲洞（入口在鏡像點，出口角度為鏡射角）
+					  ball: { x: w*0.12, y: h*0.5 },
+					  target: { x: w*0.88, y: h*0.5 },
+					  obstacles: [
+						new Obstacle(w*0.35, h*0.2, 18, 18, true, 0, 80, 2.0),
+						new Obstacle(w*0.65, h*0.8, 18, 18, true, 0, -80, 2.0)
+					  ],
+					  stars: [{x:w*0.18,y:h*0.46},{x:w*0.5,y:h*0.32},{x:w*0.82,y:h*0.68}],
+					  ammo: { attract: 3, repel: 3 },
+					  wormholes: [
+						// mirror:true 表示出口角度基於入射角做鏡像計算（需要在 teleport 處理）
+						{ x:w*0.28, y:h*0.46, exitX:w*0.72, exitY:h*0.54, mirror:true, timeLimited: true, ttl: 6000, // ms
+						  icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x:w*0.72, y:h*0.54, exitX:w*0.28, exitY:h*0.46, mirror:true, timeLimited: true, ttl: 6000, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 86: 雙重傳送迷宮（進入蟲洞第一層會隨機傳到其中一組出口，第二層再決定最終位置）
+					  ball: { x: w*0.1, y: h*0.85 },
+					  target: { x: w*0.9, y: h*0.15 },
+					  obstacles: (function(){ const a=[]; for(let i=0;i<5;i++) a.push(new Obstacle(w*0.28+i*0.09*w, h*0.45 + (i%2?60:-60), 16,16, true, 0, 80 + i*6, 1.8)); return a; })(),
+					  stars: [{x:w*0.15,y:h*0.82},{x:w*0.5,y:h*0.52},{x:w*0.82,y:h*0.18}],
+					  ammo: { attract: 4, repel: 3 },
+					  wormholes: [
+						// 第一對為「隨機分流」，實作上可在 teleport 隨機選擇 exitGroupId
+						{ id:'splitA1', group:'splitA', x:w*0.22, y:h*0.78, exitsGroup:['G1','G2'], icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'splitA2', group:'splitA', x:w*0.4,  y:h*0.5,  exitsGroup:['G1','G2'], icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						// 第二層出口組（G1）
+						{ id:'G1a', group:'G1', x:w*0.62, y:h*0.36, exitX:w*0.82, exitY:h*0.22, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'G1b', group:'G1', x:w*0.8,  y:h*0.22, exitX:w*0.62, exitY:h*0.36, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						// 第二層出口組（G2）
+						{ id:'G2a', group:'G2', x:w*0.62, y:h*0.64, exitX:w*0.82, exitY:h*0.78, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'G2b', group:'G2', x:w*0.82, y:h*0.78, exitX:w*0.62, exitY:h*0.64, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 87: 能量場反轉（蟲洞在場內，進入會翻轉重力方向短暫時間）
+					  ball: { x: w*0.12, y: h*0.12 },
+					  target: { x: w*0.88, y: h*0.88 },
+					  obstacles: [
+						new Obstacle(w*0.4, h*0.2, 120, 18, false, 0, 80, 1.6),
+						new Obstacle(w*0.6, h*0.8, 120, 18, false, 0, -80, 1.6)
+					  ],
+					  stars: [{x:w*0.14,y:h*0.14},{x:w*0.5,y:h*0.48},{x:w*0.86,y:h*0.86}],
+					  ammo: { attract: 4, repel: 4 },
+					  wormholes: [
+						// teleportFollowEffect 表示傳送後會短暫改變重力/加速度（實作可在傳送後 applyForce 向上或向下）
+						{ x:w*0.28, y:h*0.28, exitX:w*0.72, exitY:h*0.72, teleportFollowEffect:{invertGravityFor:1500}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x:w*0.72, y:h*0.72, exitX:w*0.28, exitY:h*0.28, teleportFollowEffect:{invertGravityFor:1500}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 88: 微隙波動 + 定序啟動（需先按順序觸發場內開關，蟲洞才會對應打開）
+					  ball: { x: w*0.08, y: h*0.5 },
+					  target: { x: w*0.92, y: h*0.5 },
+					  obstacles: (function(){ const a=[]; for(let i=0;i<8;i++) a.push(new Obstacle(w*0.2 + i*0.08*w, h*0.3 + (i%3?90:-90), 18,18, true, 0, 90 + i*6, 1.8)); return a; })(),
+					  stars: [{x:w*0.14,y:h*0.48},{x:w*0.5,y:h*0.34},{x:w*0.86,y:h*0.52}],
+					  ammo: { attract: 5, repel: 4 },
+					  wormholes: [
+						// seqId 表示須按順序 1->2->3 才會解鎖對應蟲洞
+						{ seqId:1, x:w*0.28, y:h*0.36, exitX:w*0.72, exitY:h*0.64, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ seqId:2, x:w*0.48, y:h*0.22, exitX:w*0.62, exitY:h*0.78, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ seqId:3, x:w*0.72, y:h*0.64, exitX:w*0.28, exitY:h*0.36, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ seqId:3, x:w*0.62, y:h*0.78, exitX:w*0.48, exitY:h*0.22, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 89: 隨機脈衝 + “誘導” 蟲洞（蟲洞會在被引力/斥力靠近時短暫移動到預設位置，需誘導其對齊）
+					  ball: { x: w*0.12, y: h*0.88 },
+					  target: { x: w*0.88, y: h*0.12 },
+					  obstacles: (function(){ const a=[]; for(let c=0;c<6;c++){ a.push(new Obstacle(w*0.2 + c*0.12*w, h*0.5 + (c%2?60:-60), 18,18, true, Math.cos(c)*50, Math.sin(c)*40, 1.9)); } return a; })(),
+					  stars: [{x:w*0.14,y:h*0.84},{x:w*0.5,y:h*0.5},{x:w*0.82,y:h*0.16}],
+					  ammo: { attract: 4, repel: 4 },
+					  wormholes: [
+						// movableWhenNear: 當球/井靠近時，蟲洞會短暫移動到預定位置 (需在 update 判斷距離並 tween)
+						{ x:w*0.26, y:h*0.78, exitX:w*0.74, exitY:h*0.22, movableWhenNear: {range:160, snapTo:{x:w*0.28,y:h*0.72}}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ x:w*0.74, y:h*0.22, exitX:w*0.26, exitY:h*0.78, movableWhenNear: {range:160, snapTo:{x:w*0.72,y:h*0.28}}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 90 (終極): 組合性挑戰 — 鏡像鏈 + 時序 + 隨機分流 + 最少彈藥（真正考驗你所有機制）
+					  ball: { x: w*0.12, y: h*0.12 },
+					  target: { x: w*0.88, y: h*0.88 },
+					  obstacles: (function(){
+						const a=[];
+						// 高密度致命格子
+						for(let c=0;c<12;c++){
+						  for(let r=0;r<3;r++){
+							a.push(new Obstacle(w*0.12 + c*0.07*w + (r%2?6:-6), h*0.18 + r*0.24*h, 12, 12, true, (c%2?40:-40), 0, 2.2));
+						  }
+						}
+						return a;
+					  })(),
+					  stars: [{x:w*0.18,y:h*0.16},{x:w*0.5,y:h*0.5},{x:w*0.82,y:h*0.84}],
+					  ammo: { attract: 2, repel: 1 },
+					  wormholes: [
+						// 三對：一對作鏡像、一對作分流、一對作時序（全部需配合使用）
+						{ id:'M1', type:'mirror', x:w*0.22, y:h*0.18, exitX:w*0.78, exitY:h*0.82, mirror:true, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'M1b', type:'mirror', x:w*0.78, y:h*0.82, exitX:w*0.22, exitY:h*0.18, mirror:true, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						{ id:'SPL', type:'split', x:w*0.4, y:h*0.36, exitsGroup:['E1','E2'], icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'E1', group:'E1', x:w*0.62, y:h*0.28, exitX:w*0.82, exitY:h*0.22, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'E2', group:'E2', x:w*0.62, y:h*0.62, exitX:w*0.82, exitY:h*0.78, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+
+						{ id:'SEQ1', seqId:1, x:w*0.32, y:h*0.48, exitX:w*0.68, exitY:h*0.52, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'SEQ2', seqId:2, x:w*0.5, y:h*0.32, exitX:w*0.5, exitY:h*0.68, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 91: 階段性能量門 + 機率分流
+					  ball:{x:w*0.06,y:h*0.5},
+					  target:{x:w*0.94,y:h*0.5},
+					  obstacles:[
+						new Obstacle(w*0.28,h*0.2,18,18,true,0,60,1.8),
+						new Obstacle(w*0.28,h*0.8,18,18,true,0,-60,1.8),
+						new Obstacle(w*0.6,h*0.5,220,16,true,0,0,0)
+					  ],
+					  stars:[ {x:w*0.12,y:h*0.48}, {x:w*0.5,y:h*0.28}, {x:w*0.5,y:h*0.72} ],
+					  ammo:{attract:3,repel:2},
+					  wormholes:[
+						{ id:'PsplitA', x:w*0.34, y:h*0.5,
+						  exits:[ {x:w*0.6,y:h*0.28,prob:0.6}, {x:w*0.6,y:h*0.72,prob:0.4} ],
+						  energyReq:1, // 需先收集至少 1 顆星才能激活
+						  icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'backA', x:w*0.6, y:h*0.28, exitX:w*0.34, exitY:h*0.5, oneWay:false, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'backB', x:w*0.6, y:h*0.72, exitX:w*0.34, exitY:h*0.5, oneWay:false, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 92: 延遲排隊 + 隊列上限（queueLimit）
+					  ball:{x:w*0.1,y:h*0.9},
+					  target:{x:w*0.9,y:h*0.1},
+					  obstacles:(function(){ const a=[]; for(let i=0;i<7;i++) a.push(new Obstacle(w*0.2+i*0.1*w, h*0.5 + (i%2?90:-90), 16,16, true, 0, 60 + i*4, 1.9)); return a; })(),
+					  stars:[ {x:w*0.16,y:h*0.86}, {x:w*0.46,y:h*0.54}, {x:w*0.8,y:h*0.2} ],
+					  ammo:{attract:4,repel:3},
+					  wormholes:[
+						{ id:'Q1', x:w*0.3, y:h*0.7, exitX:w*0.7, exitY:h*0.3, delay:600, queueLimit:2, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'Q2', x:w*0.7, y:h*0.3, exitX:w*0.3, exitY:h*0.7, delay:600, queueLimit:2, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 93: 動量扭轉（momentumMul） + 負動量出口（反向減速）
+					  ball:{x:w*0.14,y:h*0.12},
+					  target:{x:w*0.86,y:h*0.88},
+					  obstacles:[
+						new Obstacle(w*0.4,h*0.3,140,14,true,0,40,1.6),
+						new Obstacle(w*0.6,h*0.7,140,14,true,0,-40,1.6)
+					  ],
+					  stars:[ {x:w*0.18,y:h*0.14}, {x:w*0.5,y:h*0.5}, {x:w*0.82,y:h*0.86} ],
+					  ammo:{attract:3,repel:3},
+					  wormholes:[
+						{ id:'MnegA', x:w*0.32, y:h*0.24, exitX:w*0.68, exitY:h*0.76, momentumMul:-0.6, note:'反向且減速', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'MnegB', x:w*0.68, y:h*0.76, exitX:w*0.32, exitY:h*0.24, momentumMul:-0.6, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 94: 蟲洞分裂（splitCount） + 臨時克隆（cloneTTL）
+					  ball:{x:w*0.1,y:h*0.5},
+					  target:{x:w*0.9,y:h*0.5},
+					  obstacles:[
+						new Obstacle(w*0.45,h*0.1,18,18,true,0,80,2.2),
+						new Obstacle(w*0.55,h*0.9,18,18,true,0,-80,2.2)
+					  ],
+					  stars:[ {x:w*0.2,y:h*0.5}, {x:w*0.5,y:h*0.2}, {x:w*0.8,y:h*0.5} ],
+					  ammo:{attract:3,repel:2},
+					  wormholes:[
+						{ id:'Split', x:w*0.35, y:h*0.5, exitX:w*0.65, exitY:h*0.5, splitCount:3, cloneTTL:1200, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'Return', x:w*0.65, y:h*0.5, exitX:w*0.35, exitY:h*0.5, oneWay:false, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 95: 時間膨脹區域（timeDilation） + 相位鎖定成對
+					  ball:{x:w*0.08,y:h*0.1},
+					  target:{x:w*0.92,y:h*0.9},
+					  obstacles:(function(){ const a=[]; for(let i=0;i<9;i++) a.push(new Obstacle(w*0.14 + i*0.08*w, h*0.45 + (i%2?80:-80), 14,14, true, 0, 60 + i*3, 1.9)); return a; })(),
+					  stars:[ {x:w*0.12,y:h*0.12}, {x:w*0.5,y:h*0.42}, {x:w*0.86,y:h*0.88} ],
+					  ammo:{attract:4,repel:4},
+					  wormholes:[
+						{ id:'TD1', x:w*0.28, y:h*0.2, exitX:w*0.72, exitY:h*0.8, timeDilation:0.5, phaseLock:'A', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'TD2', x:w*0.72, y:h*0.8, exitX:w*0.28, exitY:h*0.2, timeDilation:0.5, phaseLock:'A', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 96: 多重出口映射 + 出口旋轉（出口會注入一個角速度）
+					  ball:{x:w*0.12,y:h*0.88},
+					  target:{x:w*0.88,y:h*0.12},
+					  obstacles:[
+						new Obstacle(w*0.45,h*0.45,200,16,true,0,0,0),
+						new Obstacle(w*0.7,h*0.3,18,18,true,0,80,1.8)
+					  ],
+					  stars:[ {x:w*0.16,y:h*0.84}, {x:w*0.48,y:h*0.5}, {x:w*0.8,y:h*0.16} ],
+					  ammo:{attract:3,repel:3},
+					  wormholes:[
+						{ id:'SpinA', x:w*0.32, y:h*0.72, exits:[ {x:w*0.68,y:h*0.28,exitSpin:0.08,exitVelAdd:{x:1.2,y:-0.6}} ], icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'SpinB', x:w*0.68, y:h*0.28, exits:[ {x:w*0.32,y:h*0.72,exitSpin:-0.08,exitVelAdd:{x:-1.2,y:0.6}} ], icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 97: 變速走道 + 蟲洞連鎖冷卻（chainCooldown）
+					  ball:{x:w*0.1,y:h*0.6},
+					  target:{x:w*0.9,y:h*0.4},
+					  obstacles:(function(){ const a=[]; for(let i=0;i<5;i++) a.push(new Obstacle(w*0.2+i*0.12*w, h*0.5, 18, 18, true, 0, (i%2?80:-80), 1.8)); return a; })(),
+					  stars:[ {x:w*0.18,y:h*0.58}, {x:w*0.5,y:h*0.42}, {x:w*0.82,y:h*0.32} ],
+					  ammo:{attract:3,repel:2},
+					  wormholes:[
+						{ id:'ChainA', x:w*0.28, y:h*0.62, exitId:'ChainB', chainCooldown:1800, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'ChainB', x:w*0.72, y:h*0.38, exitId:'ChainA', chainCooldown:1800, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 98: 能量匯聚門（energyGate）+ 最低分數要求
+					  ball:{x:w*0.06,y:h*0.22},
+					  target:{x:w*0.94,y:h*0.78},
+					  obstacles:[
+						new Obstacle(w*0.5,h*0.3,18,18,true,0,80,1.9),
+						new Obstacle(w*0.5,h*0.7,18,18,true,0,-80,1.9)
+					  ],
+					  stars:[ {x:w*0.14,y:h*0.24}, {x:w*0.3,y:h*0.5}, {x:w*0.6,y:h*0.5}, {x:w*0.86,y:h*0.76} ],
+					  ammo:{attract:4,repel:4},
+					  wormholes:[
+						{ id:'GateIn', x:w*0.34, y:h*0.32, exitX:w*0.66, exitY:h*0.68, energyReq:3, note:'需 3 顆星啟動', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'GateOut', x:w*0.66, y:h*0.68, exitX:w*0.34, exitY:h*0.32, energyReq:3, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 99: 隨機時間偏移（randomShift） + 傳送後位移噪聲
+					  ball:{x:w*0.12,y:h*0.12},
+					  target:{x:w*0.88,y:h*0.88},
+					  obstacles:(function(){ const a=[]; for(let i=0;i<10;i++) a.push(new Obstacle(w*0.12 + i*0.08*w, h*0.45 + (i%3?70:-70), 12,12, true, Math.cos(i)*30, Math.sin(i)*20, 2.0)); return a; })(),
+					  stars:[ {x:w*0.18,y:h*0.16}, {x:w*0.5,y:h*0.48}, {x:w*0.82,y:h*0.84} ],
+					  ammo:{attract:3,repel:3},
+					  wormholes:[
+						{ id:'RndA', x:w*0.32, y:h*0.22, exitX:w*0.68, exitY:h*0.78, randomShift:{posNoise:18, velNoise:0.6}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'RndB', x:w*0.68, y:h*0.78, exitX:w*0.32, exitY:h*0.22, randomShift:{posNoise:18, velNoise:0.6}, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 100: 終極合成 — 多層檢驗（phase+energy+queue+split+momentum）
+					  ball:{x:w*0.08,y:h*0.08},
+					  target:{x:w*0.92,y:h*0.92},
+					  obstacles:(function(){ const a=[]; for(let xIdx=0;xIdx<14;xIdx++){ for(let yIdx=0;yIdx<2;yIdx++){ a.push(new Obstacle(w*(0.1 + xIdx*0.06) + (yIdx?6:-6), h*(0.28 + yIdx*0.36), 10,10, true, (xIdx%2?40:-40), 0, 2.4)); } } return a; })(),
+					  stars:[ {x:w*0.14,y:h*0.12}, {x:w*0.5,y:h*0.34}, {x:w*0.82,y:h*0.18}, {x:w*0.18,y:h*0.6} ],
+					  ammo:{attract:2,repel:1},
+					  wormholes:[
+						// 第一對：分流 + 隊列（需收集 1 顆星才能開）
+						{ id:'Usplit', x:w*0.26, y:h*0.22, exits:[ {x:w*0.5,y:h*0.4,prob:0.5}, {x:w*0.7,y:h*0.2,prob:0.5} ], energyReq:1, queueLimit:1, delay:800, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						// 第二對：鏡像 + 動量（鏡像出口會翻轉入射向量並乘 momentumMul）
+						{ id:'MirrorX', x:w*0.5, y:h*0.4, exitX:w*0.68, exitY:h*0.7, mirror:true, momentumMul:0.85, phaseLock:'Z', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'MirrorXb', x:w*0.68, y:h*0.7, exitX:w*0.5, exitY:h*0.4, mirror:true, momentumMul:0.85, phaseLock:'Z', icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						// 第三對：終端分裂（分裂出 clone 幫忙觸發最後一個開關）
+						{ id:'FinalSplit', x:w*0.72, y:h*0.28, exitX:w*0.9, exitY:h*0.48, splitCount:2, cloneTTL:1000, chainCooldown:2000, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' },
+						{ id:'FinalBack', x:w*0.9, y:h*0.48, exitX:w*0.72, exitY:h*0.28, oneWay:false, icon:'/mnt/data/709d5c46-c026-4cea-8d3d-02ae03d3d26a.png' }
+					  ]
+					},
+					{ // 101: Mirror Crushers — 鏡像夾擊 + 限時鏡面蟲洞
+						id: 101,
+						ball: { x: w * 0.08, y: h * 0.3 },
+						target: { x: w * 0.92, y: h * 0.7 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 三組垂直快速夾擊（Crusher 機制：上下夾牆）
+						  [0.32, 0.5, 0.68].forEach((ox, i)=>{
+							const openingY = h * (0.25 + i*0.12);
+							const openingSize = 72 - i*8; // 縫隙逐步變小
+							const speed = 2.6 + i*0.3;
+							arr.push(new Obstacle(w * ox, 0, 22, openingY, true, 0, 120, speed));
+							arr.push(new Obstacle(w * ox, openingY + openingSize, 22, h, true, 0, -120, speed));
+						  });
+						  // 中段旋轉桿與反射牆
+						  arr.push({ type: 'rotating_bar', x: w*0.55, y: h*0.48, length: 260, angularSpeed: 0.018, lethal:true });
+						  arr.push({ type: 'reflect_wall', x1: w*0.42, y1: h*0.15, x2: w*0.6, y2: h*0.33 });
+						  return arr;
+						})(),
+						stars: [
+						  { x: w * 0.12, y: h * 0.28 },
+						  { x: w * 0.46, y: h * 0.42, timed: 1200 },
+						  { x: w * 0.82, y: h * 0.68 }
+						],
+						ammo: { attract: 2, repel: 1, chargeBurst: 0 },
+						wormholes: [
+						  // 鏡像出口：出口角度以入射角鏡像，且為短暫開啟
+						  { x: w*0.3, y: h*0.26, exitX: w*0.7, exitY: h*0.74, mirror: true, timeLimited: true, ttl: 5000, icon: null },
+						  { x: w*0.7, y: h*0.74, exitX: w*0.3, exitY: h*0.26, mirror: true, timeLimited: true, ttl: 5000, icon: null }
+						],
+						special: {
+						  note: "須在旋轉桿空檔與鏡像蟲洞時機配合穿越；夾擊節奏快、縫隙窄，容錯低"
+						}
+					  },
+					{ // 102: Recursive Split Maze — 多層隨機分流迷宮 + 能量鎖
+						id: 102,
+						ball: { x: w * 0.12, y: h * 0.86 },
+						target: { x: w * 0.88, y: h * 0.14 },
+						obstacles: (function(){
+						  const a = [];
+						  // 密集動態障礙（交錯移動）
+						  for(let i=0;i<7;i++){
+							a.push(new Obstacle(w * (0.25 + i*0.08), h * (0.45 + (i%2?0.08:-0.08)), 18, 18, true, (i%2?60:-60), 0, 2.0));
+						  }
+						  // 幾個強致命牆封路
+						  a.push(new Obstacle(w*0.5, h*0.2, 200, 16, true, 0, 0, 0));
+						  return a;
+						})(),
+						stars: [{ x: w*0.14, y: h*0.84 }, { x: w*0.48, y: h*0.52 }, { x: w*0.82, y: h*0.18 }],
+						ammo: { attract: 3, repel: 3 },
+						wormholes: [
+						  // 第一層：隨機分流群（enter -> 隨機選一組 exitsGroup）
+						  { id: 'splitA1', group:'splitA', x:w*0.22, y:h*0.78, exitsGroup:['G1','G2'], icon:null },
+						  { id: 'splitA2', group:'splitA', x:w*0.4, y:h*0.5, exitsGroup:['G1','G2'], icon:null },
+						  // 第二層出口組 G1 / G2（位置接續但有 probability bias）
+						  { id:'G1a', group:'G1', x:w*0.62, y:h*0.36, exitX:w*0.82, exitY:h*0.22, prob:0.7, icon:null },
+						  { id:'G1b', group:'G1', x:w*0.8, y:h*0.22, exitX:w*0.62, exitY:h*0.36, prob:0.3, icon:null },
+						  { id:'G2a', group:'G2', x:w*0.62, y:h*0.64, exitX:w*0.82, exitY:h*0.78, prob:0.5, icon:null },
+						  { id:'G2b', group:'G2', x:w*0.82, y:h*0.78, exitX:w*0.62, exitY:h*0.64, prob:0.5, icon:null },
+						  // 中段能量鎖：必須收至少一顆星才能激活某些傳送門
+						  { id:'energyLock', x:w*0.5, y:h*0.6, exits:[{x:w*0.72,y:h*0.18,prob:1}], energyReq:1, icon:null }
+						],
+						special: {
+						  note: "高度不確定性關卡；最佳策略是先收一顆星以解鎖能量門，並接受分流機率帶來的路徑變化"
+						}
+					  },
+					{ // 103: Phase-Orbit Labyrinth — 軌道星星 + 時間壓縮與反射廊
+						id: 103,
+						ball: { x: w * 0.1, y: h * 0.12 },
+						target: { x: w * 0.9, y: h * 0.88 },
+						obstacles: [
+						  // pulsing blockers
+						  { type:'pulsing_block', x:w*0.42, y:h*0.28, w:220, h:22, period:1200, phase:0, lethal:true },
+						  { type:'pulsing_block', x:w*0.68, y:h*0.6, w:160, h:22, period:900, phase:300, lethal:true },
+						  // 反射牆形成迷宮段
+						  { type:'reflect_wall', x1:w*0.28, y1:h*0.44, x2:w*0.52, y2:h*0.6 },
+						  { type:'reflect_wall', x1:w*0.52, y1:h*0.4, x2:w*0.78, y2:h*0.56 }
+						],
+						stars: [
+						  { orbitCenter: { x:w*0.36, y:h*0.22 }, orbitR: 60, orbitSpeed: 0.02 },
+						  { orbitCenter: { x:w*0.66, y:h*0.62 }, orbitR: 80, orbitSpeed: -0.015 },
+						  { x: w * 0.5, y: h * 0.46, timed: 1400 }
+						],
+						ammo: { attract: 3, repel: 2 },
+						special: {
+						  timeZones: [{ x: w*0.58, y: h*0.5, r:140, timeScale:0.6 }],
+						  spaceWarp: [{ x: w*0.36, y: h*0.22, r:100, compression:0.7 }],
+						  note: "軌道星與時空變形疊加，需在慢速區精準對位以收取移動星星；反射牆可用來改變入射路徑"
+						}
+					  },
+					{ // 104: Resonant Conveyor Gauntlet — 迴響輸送帶 + 定時閘門 + 旋轉保護
+						id: 104,
+						ball: { x: w * 0.08, y: h * 0.5 },
+						target: { x: w * 0.92, y: h * 0.5 },
+						obstacles: (function(){
+						  const a = [];
+						  // 多段水平 conveyor-like 障礙（用移動障礙模擬輸送帶效果）
+						  for(let i=0;i<5;i++){
+							const y = h * (0.22 + i*0.14);
+							const gapX = w * (0.18 + (i%2?0.18:0.06));
+							a.push(new Obstacle(0, y, gapX, 18, false, 80 * (i%2?1:-1), 0, 1.6 + i*0.12));
+							a.push(new Obstacle(gapX + 110, y, w - (gapX + 110), 18, false, -80 * (i%2?1:-1), 0, 1.6 + i*0.12));
+						  }
+						  // 定時閘門（上下移動）
+						  a.push(new Obstacle(w*0.5, 0, 20, h*0.32, true, 0, 120, 2.4));
+						  a.push(new Obstacle(w*0.5, h*0.68, 20, h, true, 0, -120, 2.0));
+						  // 終點旋轉護盾
+						  a.push(new Obstacle(w*0.88, h*0.5 - 60, 18, 120, true, 0, 140, 2.8));
+						  return a;
+						})(),
+						stars: [{ x:w*0.14, y:h*0.48 }, { x:w*0.46, y:h*0.28, timed:1000 }, { x:w*0.8, y:h*0.52 }],
+						ammo: { attract: 3, repel: 3 },
+						wormholes: [
+						  // one-way portal作為捷徑，但與定時閘門相互關聯（portal only open when gate phase == open）
+						  { x:w*0.38, y:h*0.28, exitX:w*0.72, exitY:h*0.28, conditionalOn: { gateId: 'gateA', state: 'open' }, icon:null }
+						],
+						special: {
+						  note: "輸送帶風格移動會改變球相對速度；需配合定時閘門與短暫傳送門取得最佳通路"
+						}
+					  },
+					{ // 105: Entropy Flux — 隨機化關卡元素 + 可誘導蟲洞（高變數測試）
+						id: 105,
+						ball: { x: w * 0.12, y: h * 0.12 },
+						target: { x: w * 0.88, y: h * 0.88 },
+						obstacles: (function(){
+						  const a = [];
+						  // 隨機化致命小塊（每次進入關卡會隨機偏移位置，這裡保留生成參數）
+						  for(let i=0;i<10;i++){
+							a.push({ type:'randMine', baseX: w*(0.18 + (i%5)*0.14), baseY: h*(0.2 + Math.floor(i/5)*0.5), w:16, h:16, moveX: (i%2?50:-50), speed:1.8 });
+						  }
+						  // 兩個移動蟲洞會在被引力吸近時移動（誘導）
+						  a.push(new Obstacle(w*0.48, h*0.48, 40, 40, false, 0, 0, 0));
+						  return a;
+						})(),
+						stars: [{x:w*0.16,y:h*0.14},{x:w*0.5,y:h*0.5, timed:1200},{x:w*0.84,y:h*0.82}],
+						ammo: { attract: 4, repel: 4 },
+						wormholes: [
+						  { x:w*0.26, y:h*0.76, exitX:w*0.74, exitY:h*0.24, movableWhenNear:{range:160, snapTo:{x:w*0.28,y:h*0.72}}, icon:null },
+						  { x:w*0.74, y:h*0.24, exitX:w*0.26, exitY:h*0.76, movableWhenNear:{range:160, snapTo:{x:w*0.72,y:h*0.28}}, icon:null }
+						],
+						special: {
+						  randomSeedHint: "關卡啟動時會基於種子隨機化小致命塊位置；蟲洞可被引力誘導對齊形成穩定通路"
+						}
+					  },
+					{ // 106: Cascade of Fragility — 級聯脆弱平台 + 隊列上限（queueLimit）
+						id: 106,
+						ball: { x: w * 0.12, y: h * 0.36 },
+						target: { x: w * 0.88, y: h * 0.64 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 多層 fragile platforms，踩過會倒計時並最終消失，會造成後續平台坍塌連鎖
+						  for(let i=0;i<6;i++){
+							arr.push({ type:'fragile_platform', x:w*(0.18 + i*0.12), y:h*(0.3 + (i%2?0.06:-0.06)), width:120, height:18, lifetime:1000 + i*200, collapseChain:true });
+						  }
+						  // 队列限制區（queueLimit）：同時在某區域內的物件數量上限，超過會觸發額外障礙
+						  arr.push({ type:'queueZone', x:w*0.5, y:h*0.5, r:160, queueLimit:2, penalty:'spawnMine' });
+						  return arr;
+						})(),
+						stars: [{x:w*0.14,y:h*0.34},{x:w*0.42,y:h*0.48},{x:w*0.82,y:h*0.62}],
+						ammo: { attract: 3, repel: 2 },
+						special: {
+						  note: "踩平台的順序決定是否能保留安全路徑；queueZone 若同時存在超過上限物體會生成額外威脅"
+						}
+					  },
+					{ // 107: Temporal Relay — 時間中繼（局部加速 / 減速）+ 時序蟲洞
+						id: 107,
+						ball: { x: w * 0.08, y: h * 0.88 },
+						target: { x: w * 0.92, y: h * 0.12 },
+						obstacles: (function(){
+						  const a = [];
+						  // 交錯 pulsing 障礙與高速移動枝節
+						  a.push({ type:'pulsing_block', x:w*0.35, y:h*0.72, w:180, h:22, period:1100, phase:0, lethal:true });
+						  a.push({ type:'pulsing_block', x:w*0.65, y:h*0.28, w:180, h:22, period:900, phase:400, lethal:true });
+						  // 狹窄通道
+						  a.push(new Obstacle(w*0.5, h*0.5, 40, 200, false, 0, 80, 1.2));
+						  return a;
+						})(),
+						stars: [{x:w*0.12,y:h*0.86},{x:w*0.5,y:h*0.62,timed:1000},{x:w*0.84,y:h*0.18}],
+						ammo: { attract: 3, repel: 3 },
+						wormholes: [
+						  // 必須按 seqId 時序觸發才會開啟下一段傳送；有的傳送會改變本地時間尺度
+						  { seqId:1, x:w*0.28, y:h*0.72, exitX:w*0.72, exitY:h*0.28, teleportFollowEffect:{timeScaleFor:0.5, duration:1400}, icon:null },
+						  { seqId:2, x:w*0.62, y:h*0.28, exitX:w*0.38, exitY:h*0.72, teleportFollowEffect:{timeScaleFor:1.6, duration:900}, icon:null }
+						],
+						special: {
+						  note: "先後順序與時間倍率的配合是通過本關的關鍵：利用減速區精準穿越，或在加速區快速跳躍錯位"
+						}
+					  },
+					{ // 108: Quantum Split Finale — 機率分流 + 窄道技巧 + 最少彈藥挑戰
+						id: 108,
+						ball: { x: w * 0.12, y: h * 0.12 },
+						target: { x: w * 0.88, y: h * 0.88 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 中段高密度小塊與窄巷
+						  for(let c=0;c<8;c++){
+							arr.push(new Obstacle(w*(0.2 + c*0.08), h*0.45 + ((c%2)?60:-60), 16, 16, true, (c%2?50:-50), 0, 2.0));
+						  }
+						  arr.push(new Obstacle(w*0.5, 0, 36, h*0.28, false, 0, 40, 1.2));
+						  return arr;
+						})(),
+						stars: [{x:w*0.15,y:h*0.14},{x:w*0.5,y:h*0.5},{x:w*0.82,y:h*0.82}],
+						ammo: { attract: 1, repel: 1 }, // 極少彈藥，考驗技巧
+						wormholes: [
+						  // 機率分流門：進入時基於設定概率到不同出口（且有energyReq）
+						  { id:'Psplit', x:w*0.34, y:h*0.48, exits:[ {x:w*0.62,y:h*0.28,prob:0.55}, {x:w*0.62,y:h*0.72,prob:0.45} ], energyReq:1, icon:null },
+						  { id:'backA', x:w*0.62, y:h*0.28, exitX:w*0.34, exitY:h*0.48, oneWay:false, icon:null },
+						  { id:'backB', x:w*0.62, y:h*0.72, exitX:w*0.34, exitY:h*0.48, oneWay:false, icon:null }
+						],
+						special: {
+						  note: "以最少彈藥完成關卡，且必須在分流與窄道中做出高精度操控；優先取得一顆星以啟動分流門"
+						}
+					  },
+					{ // 109: Magnetic Resonance Orbit — 重力場 + 公轉障礙 + 旋轉門
+						id: 109,
+						ball: { x: w * 0.12, y: h * 0.5 },
+						target: { x: w * 0.88, y: h * 0.5 },
+						obstacles: (function(){
+						  const a = [];
+						  // 中央旋轉門（高頻率）與繞轉致命塊
+						  a.push({ type:'rotating_bar', x:w*0.5, y:h*0.5, length: 300, angularSpeed: 0.025, lethal:true });
+						  for(let i=0;i<4;i++){
+							a.push(new Obstacle(w*(0.32 + i*0.12), h*0.5 + (i%2?80:-80), 20, 20, true, Math.cos(i)*60, Math.sin(i)*40, 1.9));
+						  }
+						  return a;
+						})(),
+						stars: [
+						  { x: w*0.28, y: h*0.28 },
+						  { orbitCenter: { x: w*0.5, y: h*0.5 }, orbitR: 90, orbitSpeed: 0.02 },
+						  { x: w*0.78, y: h*0.72 }
+						],
+						ammo: { attract: 3, repel: 2, chargeBurst: 1 },
+						special: {
+						  gravityZones: [
+							{ x: w*0.46, y: h*0.44, r:140, strength: -1.0 }, // 反向排斥
+							{ x: w*0.6, y: h*0.56, r:120, strength: 1.6 }   // 強吸引
+						  ],
+						  chargeGate: { x:w*0.62, y:h*0.5, requiresCharge: true },
+						  note: "利用重力場操控軌跡通過旋轉阻礙；需取得充能（或靠近充能點）才能通過 charge gate"
+						}
+					  },
+					{ // 110: Omega Synthesis — 終極整合（鏡像、分流、時序、時空壓縮、移動夾擊、最少能量）
+						id: 110,
+						ball: { x: w * 0.12, y: h * 0.12 },
+						target: { x: w * 0.88, y: h * 0.88 },
+						obstacles: (function(){
+						  const arr = [];
+						  // 高密度致命格陣（模擬精英試煉）
+						  for(let c=0;c<14;c++){
+							for(let r=0;r<3;r++){
+							  arr.push(new Obstacle(w*(0.12 + c*0.06) + (r%2?6:-6), h*(0.18 + r*0.24), 12, 12, true, (c%2?40:-40), 0, 2.4));
+							}
+						  }
+						  // 幾組快速上下夾擊（雙向）
+						  arr.push(new Obstacle(w*0.36, 0, 22, h*0.34 - 10, true, 0, 140, 2.6));
+						  arr.push(new Obstacle(w*0.36, h*0.34 + 80, 22, h, true, 0, -140, 2.6));
+						  arr.push(new Obstacle(w*0.7, 0, 22, h*0.42 - 10, true, 0, 160, 2.2));
+						  arr.push(new Obstacle(w*0.7, h*0.42 + 60, 22, h, true, 0, -160, 2.2));
+						  // 終點護盾（快速往返）
+						  arr.push(new Obstacle(w*0.88, h*0.88 - 90, 20, 180, true, 0, 180, 3.0));
+						  return arr;
+						})(),
+						stars: [{x:w*0.18,y:h*0.16},{x:w*0.5,y:h*0.5},{x:w*0.82,y:h*0.84}],
+						ammo: { attract: 1, repel: 1 }, // 極限資源
+						wormholes: [
+						  // 鏡像一對
+						  { id:'M1', type:'mirror', x:w*0.22, y:h*0.18, exitX:w*0.78, exitY:h*0.82, mirror:true, timeLimited:true, ttl:5000, icon:null },
+						  { id:'M1b', type:'mirror', x:w*0.78, y:h*0.82, exitX:w*0.22, exitY:h*0.18, mirror:true, timeLimited:true, ttl:5000, icon:null },
+						  // 分流一組（需先收星）
+						  { id:'SPL', type:'split', x:w*0.4, y:h*0.36, exitsGroup:['E1','E2'], energyReq:1, icon:null },
+						  { id:'E1', group:'E1', x:w*0.62, y:h*0.28, exitX:w*0.82, exitY:h*0.22, icon:null },
+						  { id:'E2', group:'E2', x:w*0.62, y:h*0.62, exitX:w*0.82, exitY:h*0.78, icon:null },
+						  // 時序一對（必須依序觸發 1->2 才能打開最終短暫門）
+						  { id:'SEQ1', seqId:1, x:w*0.32, y:h*0.48, exitX:w*0.68, exitY:h*0.52, icon:null },
+						  { id:'SEQ2', seqId:2, x:w*0.5, y:h*0.32, exitX:w*0.5, exitY:h*0.68, icon:null },
+						  // 最後一個 one-time use portal（過一次就消失）
+						  { id:'OMEGA', x:w*0.74, y:h*0.74, exitX:w*0.86, exitY:h*0.86, oneTime:true, icon:null }
+						],
+						special: {
+						  timeZones: [{ x:w*0.5, y:h*0.5, r:180, timeScale:0.65 }],
+						  spaceWarp: [{ x:w*0.72, y:h*0.6, r:140, compression:0.6 }],
+						  chargeRequirement: "必須至少收一顆星以啟動分流門；鏡像蟲洞短暫開啟，且OMEGA為一次性使用",
+						  note: "終極融合關卡：整合鏡像、分流、時序、時空壓縮與高速夾擊，資源極少，容錯接近零"
+						}	
+					},
+					{ // 111 — Quantum Cage (量子囚籠：鏡像、隊列上限、隨機分裂 + 最少能量)
+					  id: 111,
+					  ball: { x: w*0.12, y: h*0.12 },
+					  target: { x: w*0.88, y: h*0.88 },
+					  obstacles: (function(){
+						const a = [];
+						// 高密度鏡像格牆，穿越時間極短
+						for(let c=0;c<12;c++) for(let r=0;r<3;r++)
+						  a.push(new Obstacle(w*(0.1 + c*0.065) + (r%2?6:-6), h*(0.2 + r*0.26), 12, 12, true, (c%2?40:-40), 0, 2.6));
+						// 中段鏡面反射欄（可用來反射速度）
+						a.push({ type:'reflect_wall', x1:w*0.4, y1:h*0.45, x2:w*0.6, y2:h*0.55 });
+						return a;
+					  })(),
+					  stars: [{x:w*0.18,y:h*0.16},{x:w*0.5,y:h*0.36},{x:w*0.82,y:h*0.8}],
+					  ammo: { attract: 1, repel: 0 }, // 極少彈藥
+					  wormholes: [
+						// 分流門：只有在收集 1 顆星後才可用（energyReq）且每次開啟有 queueLimit 防止速迴圈
+						{ id:'Qsplit', x:w*0.28, y:h*0.48, exits:[ {x:w*0.62,y:h*0.28,prob:0.6}, {x:w*0.62,y:h*0.72,prob:0.4} ], energyReq:1, queueLimit:1, delay:900 }
+					  ],
+					  special: {
+						note: "資源極度匱乏，分流帶有機率，最佳策略先穩取一星再冒險分流。"
+					  }
+					},
+					{ // 112 — Temporal Mirror Gauntlet（時序鏡像跑道 + 反向動量出口 + 時間門）
+					  id: 112,
+					  ball: { x: w*0.08, y: h*0.9 },
+					  target: { x: w*0.92, y: h*0.1 },
+					  obstacles: (function(){
+						const a=[];
+						// 交錯高頻 pulsing 窄牆(致命)與小致命柱
+						for(let i=0;i<8;i++){
+						  a.push({ type:'pulsing_block', x:w*(0.15+i*0.1), y:h*(0.2 + (i%2?0.52:-0.52)), w:18, h:22, period:1000 + (i%3)*200, lethal:true });
+						  if(i%2===0) a.push(new Obstacle(w*(0.18+i*0.1), h*0.5, 16, 16, true, 0, 60 + i*5, 1.9));
+						}
+						return a;
+					  })(),
+					  stars: [{x:w*0.12,y:h*0.86},{x:w*0.5,y:h*0.62,timed:1000},{x:w*0.84,y:h*0.18}],
+					  ammo: { attract: 2, repel: 1 },
+					  wormholes: [
+						// 時間門：一個傳送會讓 local timeScale 變慢（便於精準），另一個會加速（需小心）
+						{ seqId:1, x:w*0.3, y:h*0.72, exitX:w*0.7, exitY:h*0.28, teleportFollowEffect:{timeScaleFor:0.45, duration:1400} },
+						{ seqId:2, x:w*0.62, y:h*0.28, exitX:w*0.38, exitY:h*0.72, teleportFollowEffect:{timeScaleFor:1.8, duration:900} }
+					  ],
+					  special: {
+						note: "必須依序使用兩個時序門；時間倍率變化使角度與速度判定更嚴格。"
+					  }
+					},
+					{ // 113 — Entangled Fields（糾纏場：成對障礙/蟲洞互相影響 + 縮放出口）
+					  id: 113,
+					  ball: { x: w*0.1, y: h*0.5 },
+					  target: { x: w*0.9, y: h*0.5 },
+					  obstacles: (function(){
+						const a=[];
+						// 兩組成對移動致命塊：一方被擾動時另一方同步擾動（需 engine 支援 pairLink）
+						for(let i=0;i<6;i++){
+						  a.push({ type:'paired_obstacle', id:`P${i}`, x:w*(0.22 + i*0.1), y:h*(0.25 + ((i%2)?0.5:0)), w:18, h:18, lethal:true, mvx:(i%2?60:-60), mvy:0, speed:2.0, pairLink:`P${i}` });
+						}
+						return a;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.18},{x:w*0.5,y:h*0.5},{x:w*0.86,y:h*0.82}],
+					  ammo: { attract: 3, repel: 2 },
+					  wormholes: [
+						// 出口會加注入角速度與速度倍率（出口會「縮放」球動量）
+						{ id:'E1', x:w*0.28, y:h*0.3, exitX:w*0.72, exitY:h*0.7, exitSpin:0.12, exitVelAdd:{x:1.4,y:-0.6} },
+						{ id:'E2', x:w*0.72, y:h*0.7, exitX:w*0.28, exitY:h*0.3, exitSpin:-0.12, exitVelAdd:{x:-1.4,y:0.6} }
+					  ],
+					  special: {
+						note: "成對障礙互相影響，傳送出口改變角動量，需把握鏡像動能。"
+					  }
+					},
+					{ // 114 — Void Conveyor Core（虛空輸送核心：輸送帶、井、稀有充能點、隊列）
+					  id: 114,
+					  ball: { x: w*0.12, y: h*0.12 },
+					  target: { x: w*0.88, y: h*0.88 },
+					  obstacles: (function(){
+						const a=[];
+						// 多層輸送帶（將球推入特定方向），並在主通道放置「井」會受吸引
+						for(let i=0;i<5;i++){
+						  const y = h*(0.22 + i*0.14);
+						  a.push(new Obstacle(0, y, w*0.36, 16, false, 120 * (i%2?1:-1), 0, 1.8 + i*0.12));
+						  a.push(new Obstacle(w*0.64, y, w*0.36, 16, true, -120 * (i%2?1:-1), 0, 1.8 + i*0.12));
+						}
+						// 中央吸力井（若停留則會被拉向中心）
+						a.push({ type:'gravity_well', x:w*0.5, y:h*0.5, r:140, strength:1.6, lethal:false });
+						return a;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.14},{x:w*0.5,y:h*0.48,timed:1200},{x:w*0.84,y:h*0.84}],
+					  ammo: { attract: 2, repel: 1 },
+					  wormholes: [
+						// energyGate：必須收 2 顆星並且 queueLimit=1 才開啟
+						{ id:'GateIn', x:w*0.34, y:h*0.32, exitX:w*0.66, exitY:h*0.68, energyReq:2, queueLimit:1, delay:800 }
+					  ],
+					  special: {
+						note: "輸送帶會改變相對速度並可能把球推入吸力井；資源與隊列限制讓冒險更刺激。"
+					  }
+					},
+					{ // 115 — Phase-Locked Crusher (相位鎖定夾擊 + 鏈式蟲洞冷卻)
+					  id: 115,
+					  ball: { x: w*0.1, y: h*0.9 },
+					  target: { x: w*0.9, y: h*0.1 },
+					  obstacles: (function(){
+						const a=[];
+						// 資格門：多組垂直夾擊以固定相位交替（需支持 phaseOffset/phasePeriod）
+						for(let i=0;i<4;i++){
+						  const ox = w*(0.3 + i*0.12);
+						  a.push(new Obstacle(ox, 0, 22, h*0.4, true, 0, 120 + i*10, 2.8));
+						  a[a.length-1].phaseOffset = i*20;
+						  a[a.length-1].phasePeriod = 140; // 140 frames
+						  a.push(new Obstacle(ox, h*0.6, 22, h*0.4, true, 0, -120 - i*10, 2.8));
+						  a[a.length-1].phaseOffset = i*20;
+						  a[a.length-1].phasePeriod = 140;
+						}
+						return a;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.86},{x:w*0.5,y:h*0.56},{x:w*0.82,y:h*0.18}],
+					  ammo: { attract: 2, repel: 0 },
+					  wormholes: [
+						// 蟲洞鏈：進入 A 會傳到 B 並觸發 chainCooldown（防止瞬迴）
+						{ id:'ChainA', x:w*0.28, y:h*0.78, exitId:'ChainB', chainCooldown:2000 },
+						{ id:'ChainB', x:w*0.72, y:h*0.22, exitId:'ChainA', chainCooldown:2000 }
+					  ],
+					  special: {
+						note: "要在夾擊窗口內穿越；蟲洞鏈的冷卻防止濫用，鼓勵精準 timing。"
+					  }
+					},
+					{ // 116 — Nullfield Labyrinth（虛無場迷宮：視野受限 + 隨機位移噪聲 + 分裂克隆）
+					  id: 116,
+					  ball: { x: w*0.12, y: h*0.12 },
+					  target: { x: w*0.88, y: h*0.88 },
+					  obstacles: (function(){
+						const a=[];
+						// 高密度小致命格，並在 map 加入 fogZone（視野減少）
+						for(let i=0;i<10;i++) a.push(new Obstacle(w*(0.12+i*0.08), h*(0.45 + (i%3?70:-70)), 12, 12, true, Math.cos(i)*30, Math.sin(i)*20, 2.1));
+						return a;
+					  })(),
+					  stars: [{x:w*0.18,y:h*0.16},{x:w*0.5,y:h*0.48},{x:w*0.82,y:h*0.84}],
+					  ammo: { attract: 3, repel: 2 },
+					  wormholes: [
+						// Split：產生 2 個短暫 clone 來通過窄道（cloneTTL）
+						{ id:'SplitX', x:w*0.35, y:h*0.5, exitX:w*0.65, exitY:h*0.5, splitCount:2, cloneTTL:900, chainCooldown:1600 },
+						{ id:'Return', x:w*0.65, y:h*0.5, exitX:w*0.35, exitY:h*0.5 }
+					  ],
+					  special: {
+						fogZones: [{ x:w*0.5, y:h*0.5, r:220, visibilityMul:0.35 }],
+						randomShiftOnTeleport: { posNoise: 12, velNoise: 0.5 },
+						note: "視野受限會增加定位難度；分裂 clone 可作為解題工具但存續短。"
+					  }
+					},
+					{ // 117 — Entropic Relay（熵中繼：隨機化障礙 + 誘導蟲洞 + 能量匯聚）
+					  id: 117,
+					  ball: { x: w*0.08, y: h*0.08 },
+					  target: { x: w*0.92, y: h*0.92 },
+					  obstacles: (function(){
+						const a=[];
+						// 隨機化小雷（randMine）每次載入會偏移
+						for(let i=0;i<12;i++) a.push({ type:'randMine', baseX:w*(0.18 + (i%6)*0.12), baseY:h*(0.18 + Math.floor(i/6)*0.6), w:16, h:16, moveX:(i%2?50:-50), speed:1.9 });
+						return a;
+					  })(),
+					  stars: [{x:w*0.16,y:h*0.14},{x:w*0.5,y:h*0.5,timed:1100},{x:w*0.84,y:h*0.86}],
+					  ammo: { attract: 3, repel: 3 },
+					  wormholes: [
+						// 可誘導的蟲洞：靠近會移動對齊，需把球/井誘導到指定 snap 點
+						{ x:w*0.26, y:h*0.76, exitX:w*0.74, exitY:h*0.24, movableWhenNear:{range:160, snapTo:{x:w*0.28,y:h*0.72}} },
+						{ x:w*0.74, y:h*0.24, exitX:w*0.26, exitY:h*0.76, movableWhenNear:{range:160, snapTo:{x:w*0.72,y:h*0.28}} }
+					  ],
+					  special: {
+						energyGate: { id:'CoreGate', x:w*0.5, y:h*0.34, requiresStars:2 },
+						randomSeedHint: "每次載入地雷位置會不同；蟲洞需被誘導到對齊才可靠通過。"
+					  }
+					},
+					{ // 118 — Singularity Carousel（奇點轉盤：環狀漩渦 + 放射性致命塊 + 角速度出口）
+					  id: 118,
+					  ball: { x: w*0.12, y: h*0.2 },
+					  target: { x: w*0.88, y: h*0.8 },
+					  obstacles: (function(){
+						const a=[];
+						const cx=w*0.5, cy=h*0.5;
+						// 多重同心環放射致命塊（高頻）
+						for(let r=0;r<4;r++){
+						  const pieces = 10 + r*6;
+						  const radius = 60 + r*50;
+						  for(let p=0;p<pieces;p++){
+							const ang = (p/pieces)*Math.PI*2;
+							a.push(new Obstacle(cx + Math.cos(ang)*radius, cy + Math.sin(ang)*radius, 16,16, (r>0)||(p%3===0), Math.cos(ang)*(30 + r*10), Math.sin(ang)*(30 + r*10), 1.8 + r*0.12));
+						  }
+						}
+						// 中央旋轉桿 (boss-like)
+						a.push({ type:'rotating_bar', x:cx, y:cy, length:320, angularSpeed:0.03, lethal:true });
+						return a;
+					  })(),
+					  stars: [{ x: w*0.28, y: h*0.28 }, { orbitCenter:{x:w*0.5,y:h*0.5}, orbitR:100, orbitSpeed:0.02 }, { x: w*0.78, y: h*0.72 }],
+					  ammo: { attract: 2, repel: 1, chargeBurst: 0 },
+					  wormholes: [
+						// 出口注入角速度（exitSpin），出口周邊有擾動
+						{ x:w*0.48, y:h*0.62, exitX:w*0.82, exitY:h*0.32, exitSpin:0.12, exitVelAdd:{x:1.2,y:-0.6} },
+						{ x:w*0.82, y:h*0.32, exitX:w*0.48, exitY:h*0.62, exitSpin:-0.12, exitVelAdd:{x:-1.2,y:0.6} }
+					  ],
+					  special: {
+						gravityZones: [{ x:w*0.46, y:h*0.44, r:140, strength:-1.0 }, { x:w*0.6, y:h*0.56, r:120, strength:1.6 }],
+						note: "高密度放射塊與旋轉保護，傳送會改變角速度，通過後要快速調整。"
+					  }
+					},
+					{ // 119 — Omega Reckoning（終極內卷：鏡像、多重分流、時序相位、能量鎖）
+					  id: 119,
+					  ball: { x: w*0.08, y: h*0.08 },
+					  target: { x: w*0.92, y: h*0.92 },
+					  obstacles: (function(){
+						const a=[];
+						// 交錯小塊矩陣 + 動態窄隙（高密度、速度更快）
+						for(let c=0;c<14;c++) for(let r=0;r<3;r++)
+						  a.push(new Obstacle(w*(0.12 + c*0.06) + (r%2?6:-6), h*(0.28 + r*0.36), 10,10, true, (c%2?48:-48), 0, 2.8 + c*0.03));
+						return a;
+					  })(),
+					  stars: [{x:w*0.18,y:h*0.16},{x:w*0.5,y:h*0.34},{x:w*0.82,y:h*0.18},{x:w*0.18,y:h*0.6}],
+					  ammo: { attract: 1, repel: 1 },
+					  wormholes: [
+						// 三對：分流、鏡像、時序（全部需配合使用）
+						{ id:'MIR', type:'mirror', x:w*0.24, y:h*0.2, exitX:w*0.76, exitY:h*0.8, mirror:true },
+						{ id:'MIRb', type:'mirror', x:w*0.76, y:h*0.8, exitX:w*0.24, exitY:h*0.2, mirror:true },
+						{ id:'SPL', id:'SPL', type:'split', x:w*0.4, y:h*0.36, exitsGroup:['E1','E2'] },
+						{ id:'E1', group:'E1', x:w*0.62, y:h*0.28, exitX:w*0.82, exitY:h*0.22 },
+						{ id:'E2', group:'E2', x:w*0.62, y:h*0.62, exitX:w*0.82, exitY:h*0.78 },
+						{ id:'SEQ1', seqId:1, x:w*0.32, y:h*0.48, exitX:w*0.68, exitY:h*0.52 },
+						{ id:'SEQ2', seqId:2, x:w*0.5, y:h*0.32, exitX:w*0.5, exitY:h*0.68 }
+					  ],
+					  special: {
+						note: "最佳策略需同時管理鏡像通路、分流機率與時序相位；彈藥極少。"
+					  }
+					},
+					{ // 120 — Final Synthesis (終極合成 II — 所有機制：phase + split + momentum + clone + queue + energy)
+					  id: 120,
+					  ball: { x: w*0.06, y: h*0.06 },
+					  target: { x: w*0.94, y: h*0.94 },
+					  obstacles: (function(){
+						const a=[];
+						// 極密集障礙層（2D格子），並隨時間微幅左右擺動（讓路徑不穩定）
+						for(let xIdx=0;xIdx<14;xIdx++){
+						  for(let yIdx=0;yIdx<2;yIdx++){
+							a.push(new Obstacle(w*(0.1 + xIdx*0.06) + (yIdx?6:-6), h*(0.28 + yIdx*0.36), 10,10, true, (xIdx%2?40:-40), 0, 2.6 + xIdx*0.02));
+						  }
+						}
+						// 兩個高速移動的致命列車（移動軌跡固定）
+						a.push(new Obstacle(w*0.5, 0, 18, h*0.3, true, 0, 160, 3.6));
+						a.push(new Obstacle(w*0.72, h*0.7, 18, h*0.3, true, 160, 0, 3.0));
+						return a;
+					  })(),
+					  stars: [{x:w*0.14,y:h*0.12},{x:w*0.5,y:h*0.34},{x:w*0.82,y:h*0.18},{x:w*0.18,y:h*0.6}],
+					  ammo: { attract: 1, repel: 0 },
+					  wormholes: [
+						// 第一對：分流 + 隊列 + 延遲（需收集 1 顆星才能開）
+						{ id:'Usplit', x:w*0.26, y:h*0.22, exits:[ {x:w*0.5,y:h*0.4,prob:0.5}, {x:w*0.7,y:h*0.2,prob:0.5} ], energyReq:1, queueLimit:1, delay:900 },
+						// 第二對：鏡像 + 動量：鏡像出口會翻轉入射向量並乘 momentumMul（phaseLock 要與 gate 同步）
+						{ id:'MirrorX', x:w*0.5, y:h*0.4, exitX:w*0.68, exitY:h*0.7, mirror:true, momentumMul:0.78, phaseLock:'Z' },
+						{ id:'MirrorXb', x:w*0.68, y:h*0.7, exitX:w*0.5, exitY:h*0.4, mirror:true, momentumMul:0.78, phaseLock:'Z' },
+						// 第三對：終端分裂：分裂 clone 來觸發最後開關（cloneTTL）
+						{ id:'FinalSplit', x:w*0.72, y:h*0.28, exitX:w*0.9, exitY:h*0.48, splitCount:2, cloneTTL:1000, chainCooldown:2000 },
+						{ id:'FinalBack', x:w*0.9, y:h*0.48, exitX:w*0.72, exitY:h*0.28, oneWay:false }
+					  ],
+					  special: {
+						note: "真正的終極挑戰：彈藥幾乎沒有、障礙密集且移動快速；需要同時管理 phase、energy、queue、split 與 momentum 的交互。",
+						requiredEngineFeatures: ["mirrorTeleportWithMomentum", "wormholeQueue", "cloneSpawnOnTeleport", "phaseLockSystem"]
+					  }
+					}
+				];
+            }
+			
+			// ---------- factory helpers (place inside Game class) ----------
+			createStarFromDescriptor(s) {
+			  if (s instanceof Star) return s;
+			  if (s.orbitCenter) {
+				const st = new Star(s.orbitCenter.x + (s.orbitR||0), s.orbitCenter.y);
+				st.orbit = { center: new Vec2(s.orbitCenter.x, s.orbitCenter.y), r: s.orbitR||0, speed: s.orbitSpeed||0.02, phase: s.orbitPhase||0 };
+				if (s.timed) st._appearAt = performance.now() + s.timed;
+				return st;
+			  }
+			  const st = new Star(s.x || 0, s.y || 0);
+			  if (s.timed) st._appearAt = performance.now() + s.timed;
+			  return st;
+			}
+
+			createWormholeFromDescriptor(w, idx) {
+			  if (w instanceof Wormhole) return w;
+			  const exitX = w.exitX !== undefined ? w.exitX : (w.exit ? w.exit.x : 0);
+			  const exitY = w.exitY !== undefined ? w.exitY : (w.exit ? w.exit.y : 0);
+			  const wh = new Wormhole(w.x || 0, w.y || 0, exitX, exitY, (w.id !== undefined ? w.id : idx));
+			  // attach any meta for timeLimited / mirror / other flags
+			  wh.meta = {
+				mirror: !!w.mirror,
+				timeLimited: !!w.timeLimited,
+				ttl: w.ttl || 0,
+				seqId: w.seqId,
+				group: w.group,
+				exitsGroup: w.exitsGroup,
+				energyReq: w.energyReq || 0,
+				conditionalOn: w.conditionalOn || null
+			  };
+			  return wh;
+			}
+
+			createObstacleFromDescriptor(desc) {
+			  // If already an Obstacle instance, pass through
+			  if (desc instanceof Obstacle) return desc;
+
+			  // If it's a plain moving/rect descriptor that matches Obstacle constructor
+			  if (desc.x !== undefined && desc.y !== undefined && desc.w !== undefined && desc.h !== undefined) {
+				// map fields carefully (origPos used by your Obstacle class)
+				const o = new Obstacle(desc.x, desc.y, desc.w, desc.h, !!desc.isDeadly, desc.moveX || desc.moveVec && desc.moveVec.x || 0, desc.moveY || desc.moveVec && desc.moveVec.y || 0, desc.speed || 0);
+				// attach meta for special types
+				o._meta = o._meta || {};
+				return o;
+			  }
+
+			  // Special typed obstacles (rotating_bar, pulsing_block, reflect_wall, fragile_platform, randMine, queueZone...)
+			  const t = desc.type || desc.t || null;
+			  if (t === 'rotating_bar') {
+				// create a thin Obstacle as visual placeholder, but store meta for collision handling
+				const length = desc.length || 200;
+				const thickness = desc.thickness || 8;
+				const lethal = !!desc.lethal || !!desc.isDeadly;
+				const ob = new Obstacle((desc.x||0) - length/2, (desc.y||0) - thickness/2, length, thickness, lethal, 0,0,0);
+				ob._meta = {
+				  kind: 'rotating_bar',
+				  cx: desc.x || 0,
+				  cy: desc.y || 0,
+				  length: length,
+				  angularSpeed: desc.angularSpeed || 0.02,
+				  angle: desc.startAngle || 0,
+				  lethal: lethal
+				};
+				return ob;
+			  }
+			  if (t === 'reflect_wall') {
+				const ob = new Obstacle(0,0,0,0,false,0,0,0);
+				ob._meta = {
+				  kind: 'reflect_wall',
+				  x1: desc.x1, y1: desc.y1, x2: desc.x2, y2: desc.y2,
+				  lethal: !!desc.lethal
+				};
+				return ob;
+			  }
+			  if (t === 'pulsing_block') {
+				const ob = new Obstacle(desc.x || 0, desc.y || 0, desc.w || 100, desc.h || 20, !!desc.lethal, 0,0,0);
+				ob._meta = { kind: 'pulsing_block', period: desc.period, phase: desc.phase, lethal: !!desc.lethal };
+				return ob;
+			  }
+			  // fragile_platform / queueZone / randMine etc. store as meta-only (you may implement runtime effects later)
+			  const generic = new Obstacle(desc.x||0, desc.y||0, desc.w||20, desc.h||20, !!desc.isDeadly, 0,0,0);
+			  generic._meta = Object.assign({}, desc);
+			  return generic;
+			}
+
+
+			// === 新增方法：檢查/解鎖關卡 ===
+			isLevelUnlocked(levelNum) {
+				// 若開啟 global 解鎖，任何關卡都可進入
+				if (this.unlockAll) return true;
+
+				// 原本邏輯：第一關永遠解鎖，其它需依前一關有過關記錄
+				if (levelNum === 1) return true;
+				return this.progress && (this.progress[levelNum - 1] !== undefined);
+			}
+
+			unlockLevel(levelNum) {
+				// 將某關標記為已通過（至少寫入 0），用於解鎖下一關
+				if (!this.progress || typeof this.progress !== 'object') this.progress = {};
+				if (this.progress[levelNum] === undefined) {
+					this.progress[levelNum] = 0;
+					try { localStorage.setItem('orbital_save', JSON.stringify(this.progress)); } catch (e) {}
+				}
+			}
+			// 切換解鎖模式，並更新按鈕文字與重新渲染選單
+			toggleUnlockAll() {
+				this.unlockAll = !this.unlockAll;
+				const btn = document.getElementById('btn-unlock-all');
+				if (btn) btn.innerText = `解鎖模式: ${this.unlockAll ? 'ON' : 'OFF'}`;
+				// 重新 render 選關（讓按鈕狀態 + 卡片顯示一致）
+				this.renderMainMenu();
+			}
+            renderMainMenu() {
+				const grid = document.getElementById('level-grid-container');
+				grid.innerHTML = '';
+
+				this.levelConfig.forEach((lvl, index) => {
+					const levelNum = index + 1;
+					const starsEarned = this.progress[levelNum] || 0;
+					const unlocked = this.isLevelUnlocked(levelNum);
+
+					const card = document.createElement('div');
+					card.className = 'level-card' + (unlocked ? '' : ' locked');
+
+					// 如果解鎖才能點；沒解鎖則顯示鎖頭
+					if (unlocked) {
+						card.onclick = () => this.startLevel(levelNum);
+					} else {
+						card.onclick = () => {
+							// 輕微回饋：播放失敗音或閃爍（可自訂）
+							try { playSound('die'); } catch(e){}
+						};
+					}
+
+					let starsHtml = '';
+					for (let i = 0; i < 3; i++) {
+						starsHtml += `<span class="star-icon ${i < starsEarned ? 'filled' : ''}">★</span>`;
+					}
+
+					card.innerHTML = `
+						<div class="text-cyan-400 font-bold text-xl">LEVEL ${levelNum}</div>
+						<div class="stars-display">${starsHtml}</div>
+						${unlocked ? '' : '<div class="lock-badge">LOCK</div>'}
+					`;
+
+					grid.appendChild(card);
+				});
+				this.updateUnlockButton && this.updateUnlockButton();
+				// renderMainMenu 最後（或一開始）加入：
+				const unlockBtn = document.getElementById('btn-unlock-all');
+				if (unlockBtn) unlockBtn.innerText = `解鎖模式: ${this.unlockAll ? 'ON' : 'OFF'}`;
+			}
+
+			createObstacleFromDescriptor(desc) {
+			  // if desc is already an Obstacle instance
+			  if (desc instanceof Obstacle) return desc;
+			  if (!desc) return new Obstacle(0,0,40,40,false,0,0,0);
+			  // if desc.type known -> map to Obstacle + meta
+			  const t = desc.type || (desc._raw && desc._raw.type) || 'rect';
+			  if (t === 'rotating_bar') {
+				// create obstacle but put rotating meta
+				const length = desc.length || 200;
+				const thickness = desc.thickness || 8;
+				const ob = new Obstacle((desc.x||0) - length/2, (desc.y||0) - thickness/2, length, thickness, !!desc.lethal, 0,0,0, 'rotating_bar', {
+				  cx: desc.x, cy: desc.y, length, thickness, angularSpeed: desc.angularSpeed || 0.02, lethal: !!desc.lethal
+				});
+				return ob;
+			  }
+			  if (t === 'pulsing_block') {
+				return new Obstacle(desc.x||0, desc.y||0, desc.w||60, desc.h||20, !!desc.lethal, 0,0,0, 'pulsing_block', { period:desc.period, phase:desc.phase, lethal:!!desc.lethal });
+			  }
+			  if (t === 'fragile_platform') {
+				return new Obstacle(desc.x||0, desc.y||0, desc.width||120, desc.height||18, !!desc.lethal, 0,0,0, 'fragile_platform', { lifetime:desc.lifetime, collapseChain:!!desc.collapseChain });
+			  }
+			  if (t === 'randMine') {
+				// randomize base
+				const baseX = desc.baseX || 0, baseY = desc.baseY || 0;
+				const jitter = desc.jitter || 40;
+				const rx = baseX + (Math.random()-0.5)*jitter;
+				const ry = baseY + (Math.random()-0.5)*jitter;
+				return new Obstacle(rx, ry, desc.w||16, desc.h||16, true, desc.moveX||0, 0, desc.speed||0, 'randMine', { baseX, baseY });
+			  }
+			  if (t === 'queueZone') {
+				const r = desc.r || 160;
+				return new Obstacle((desc.x||0)-r, (desc.y||0)-r, r*2, r*2, false, 0,0,0, 'queueZone', { r: r, queueLimit: desc.queueLimit, penalty: desc.penalty });
+			  }
+			  if (t === 'reflect_wall') {
+				// create as thin rect but meta has endpoints
+				const x1 = desc.x1||0, y1 = desc.y1||0, x2 = desc.x2||0, y2 = desc.y2||0;
+				const w = Math.abs(x2-x1) || 6, h = Math.abs(y2-y1) || 6;
+				return new Obstacle(Math.min(x1,x2), Math.min(y1,y2), w, h, false, 0,0,0, 'reflect_wall', { x1,y1,x2,y2 });
+			  }
+			  // fallback: treat as rect with possible moveX/moveY/speed
+			  return new Obstacle(desc.x || (desc.origPos && desc.origPos.x) || 0, desc.y || (desc.origPos && desc.origPos.y) || 0,
+								  desc.w || desc.width || 40, desc.h || desc.height || 40,
+								  !!desc.isDeadly || !!desc.lethal, desc.moveX||0, desc.moveY||0, desc.speed||0, 'rect', { raw: desc });
+			}
+
+			createStarFromDescriptor(s) {
+			  if (s instanceof Star) return s;
+			  if (s.orbitCenter) {
+				const st = new Star(s.orbitCenter.x + (s.orbitR||0), s.orbitCenter.y);
+				st.orbit = { center: new Vec2(s.orbitCenter.x, s.orbitCenter.y), r: s.orbitR||0, speed: s.orbitSpeed||0.02, phase: Math.random()*Math.PI*2 };
+				if (s.timed) st.timed = s.timed;
+				return st;
+			  }
+			  const st = new Star(s.x || 0, s.y || 0);
+			  if (s.timed) st.timed = s.timed;
+			  return st;
+			}
+
+			createWormholeFromDescriptor(w, idx) {
+			  if (w instanceof Wormhole) return w;
+			  const exitX = (typeof w.exitX !== 'undefined') ? w.exitX : (w.exit && w.exit.x) || 0;
+			  const exitY = (typeof w.exitY !== 'undefined') ? w.exitY : (w.exit && w.exit.y) || 0;
+			  const wh = new Wormhole(w.x||0, w.y||0, exitX, exitY, w.id || idx, { mirror: !!w.mirror, timeLimited: !!w.timeLimited, ttl: w.ttl, movableWhenNear: w.movableWhenNear, seqId: w.seqId });
+			  return wh;
+			}
+
+			
+            startLevel(lvl) {
+				if (!this.isLevelUnlocked(lvl)) {
+					// 未解鎖：輕微反饋
+					try { playSound('die'); } catch(e){}
+					// 可選：短暫閃爍或顯示提示，這裡直接 return
+					return;
+				}
+
+				document.getElementById('main-menu').classList.add('hidden');
+				document.getElementById('game-ui').classList.remove('hidden');
+
+				// First time playing ever? Show tutorial
+				if (lvl === 1 && !localStorage.getItem('orbital_tut')) {
+					document.getElementById('tutorial-modal').classList.remove('hidden');
+					localStorage.setItem('orbital_tut', 'true');
+				}
+
+				this.loadLevel(lvl);
+			}
+
+            returnToMenu() {
+                this.state = 'menu';
+                document.getElementById('game-ui').classList.add('hidden');
+                document.getElementById('level-complete-modal').style.display = 'none';
+                document.getElementById('main-menu').classList.remove('hidden');
+                this.renderMainMenu();
+                
+                // Clear game
+                this.wells = [];
+                this.particles = [];
+                this.ball = null;
+                this.ctx.clearRect(0,0,this.canvas.width, this.canvas.height);
+            }
+
+            closeTutorial() {
+                document.getElementById('tutorial-modal').classList.add('hidden');
+                if(audioCtx.state === 'suspended') audioCtx.resume();
+            }
+
+            loadLevel(lvl) {
+                this.level = lvl;
+                if (lvl > this.levelConfig.length) { this.returnToMenu(); return; }
+                
+                const cfg = this.levelConfig[this.level - 1];
+                
+                this.ball = new Ball(cfg.ball.x, cfg.ball.y);
+                this.target = new Target(cfg.target.x, cfg.target.y);
+
+				this.obstacles = (cfg.obstacles || []).map(o => this.createObstacleFromDescriptor(o));
+				this.stars = (cfg.stars || []).map(s => this.createStarFromDescriptor(s));
+				this.wormholes = (cfg.wormholes || []).map((w,i) => this.createWormholeFromDescriptor(w,i));
+				
+                this.wells = [];
+                this.maxWells = { ...cfg.ammo };
+                this.particles = [];
+                
+                this.state = 'editing';
+                document.getElementById('level-display').innerText = this.level;
+                this.updateStarUI();
+                this.updateUI();
+                
+                // Reset UI Elements
+                const launchBtn = document.getElementById('btn-launch');
+                launchBtn.innerText = "發射 (LAUNCH)";
+                launchBtn.classList.remove('bg-red-900');
+                document.getElementById('level-complete-modal').style.display = 'none';
+            }
+
+            updateUI() {
+                const counts = { attract: 0, repel: 0 };
+                this.wells.forEach(w => counts[w.type]++);
+                document.getElementById('ammo-attract').innerText = `x${this.maxWells.attract - counts.attract}`;
+                document.getElementById('ammo-repel').innerText = `x${this.maxWells.repel - counts.repel}`;
+                
+                ['attract', 'repel', 'eraser'].forEach(t => {
+                    const btn = document.getElementById(`btn-${t}`);
+                    if (this.selectedTool === t) btn.classList.add('selected');
+                    else btn.classList.remove('selected');
+                });
+            }
+
+            updateStarUI() {
+                const collected = this.stars.filter(s => s.collected).length;
+                document.getElementById('star-counter').innerText = collected;
+            }
+
+            setTool(tool) {
+                this.selectedTool = tool;
+                this.updateUI();
+            }
+
+            handleInput(e) {
+                if (this.state !== 'editing') return;
+                const rect = this.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const clickPos = new Vec2(x, y);
+
+                if (this.selectedTool === 'eraser') {
+                    for (let i = this.wells.length - 1; i >= 0; i--) {
+                        if (clickPos.dist(this.wells[i].pos) < 30) {
+                            this.wells.splice(i, 1);
+                            playSound('delete');
+                            this.spawnParticles(x, y, '#ff3333');
+                            this.updateUI();
+                            return;
+                        }
+                    }
+                } else {
+                    const currentCount = this.wells.filter(w => w.type === this.selectedTool).length;
+                    if (currentCount >= this.maxWells[this.selectedTool]) return;
+                    if (clickPos.dist(this.ball.startPos) < 50) return;
+                    if (clickPos.dist(this.target.pos) < 50) return;
+                    
+                    this.wells.push(new GravityWell(x, y, this.selectedTool));
+                    playSound('place');
+                    this.spawnParticles(x, y, this.selectedTool === 'attract' ? '#a855f7' : '#f97316');
+                    this.updateUI();
+                }
+            }
+
+            toggleSim() {
+                if (this.state === 'editing') {
+                    this.state = 'simulating';
+                    this.ball.reset();
+                    this.ball.active = true;
+                    document.getElementById('btn-launch').innerText = "停止 (STOP)";
+                    document.getElementById('btn-launch').classList.add('bg-red-900');
+                    // Reset star state for this run (you must collect them in the successful run)
+                    this.stars.forEach(s => s.reset());
+                    this.updateStarUI();
+                } else {
+                    this.resetLevel();
+                }
+            }
+
+            resetLevel() {
+				if (this.state === 'menu') return;
+				this.state = 'editing';
+
+				// 重置球體
+				this.ball.reset();
+
+				// 重置障礙物位置
+				this.obstacles.forEach(o => {
+					o.pos.x = o.origPos.x;
+					o.pos.y = o.origPos.y;
+					o.time = 0;
+				});
+
+				// 重置星星狀態
+				this.stars.forEach(s => s.reset());
+				this.updateStarUI();
+
+				// **清空所有引力/斥力井（你想要的改動）**
+				this.wells = [];
+
+				// 清掉球的傳送狀態
+				if (this.ball) {
+					this.ball._teleCooldown = 0;
+					this.ball._lastTeleFromId = undefined;
+				}
+
+				// 取消任何拖曳狀態，並清空粒子（可選）
+				this.dragging = null;
+				this.particles = [];
+
+				// 更新 UI（彈藥計數、按鈕樣式）
+				this.updateUI();
+
+				const launchBtn = document.getElementById('btn-launch');
+				launchBtn.innerText = "發射 (LAUNCH)";
+				launchBtn.classList.remove('bg-red-900');
+
+				document.getElementById('level-complete-modal').style.display = 'none';
+			}
+
+            nextLevel() {
+                this.loadLevel(this.level + 1);
+            }
+			
+			// 在 Game 類別內新增
+			replayLevel() {
+				try {
+					// 隱藏 modal（雙重保險：class + style）
+					const modal = document.getElementById('level-complete-modal');
+					if (modal) {
+						modal.classList.add('hidden');
+						modal.style.display = 'none';
+					}
+					// 確保 main menu 隱藏（以免跑版）
+					const mainMenu = document.getElementById('main-menu');
+					if (mainMenu) mainMenu.classList.add('hidden');
+
+					// 重新載入目前關卡（loadLevel 會設定 state, ui, ball 等）
+					this.loadLevel(this.level);
+
+					// 可選：若你希望重新遊玩後立刻自動發射（開始模擬），就把下一行解除註解
+					// this.toggleSim();
+				} catch (err) {
+					console.error('replayLevel error:', err);
+				}
+			}
+
+			
+            spawnParticles(x, y, color, count = 10) {
+                for(let i=0; i<count; i++) {
+                    this.particles.push(new Particle(x, y, color));
+                }
+            }
+
+            update() {
+				if (this.state === 'menu') return;
+
+				// Update moving obstacles & particles (unchanged)
+				this.obstacles.forEach(o => o.update());
+				for (let i = this.particles.length - 1; i >= 0; i--) {
+					this.particles[i].update();
+					if (this.particles[i].life <= 0) this.particles.splice(i, 1);
+				}
+
+				if (this.state === 'simulating') {
+					// ---- 1) Apply forces from wells (same as原本) ----
+					this.wells.forEach(w => {
+						let dir = w.pos.sub(this.ball.pos);
+						let d = dir.mag();
+						d = Math.max(d, 20); d = Math.min(d, 300);
+						dir = dir.normalize();
+						let forceMag = (w.strength * 50) / (d * d);
+						this.ball.applyForce(dir.mult(forceMag));
+					});
+
+					// ---- 2) Swept-test: record prevPos, then update ball to new pos ----
+					const prevPos = new Vec2(this.ball.pos.x, this.ball.pos.y);
+					this.ball.update();
+					const currPos = this.ball.pos;
+
+					// ---- 3) Collisions: Canvas Edges (keep original behavior) ----
+					if (this.ball.pos.x < 0 || this.ball.pos.x > this.canvas.width) {
+						this.ball.vel.x *= -0.8;
+						this.ball.pos.x = this.ball.pos.x < 0 ? 0 : this.canvas.width;
+						playSound('bounce');
+					}
+					if (this.ball.pos.y < 0 || this.ball.pos.y > this.canvas.height) {
+						this.ball.vel.y *= -0.8;
+						this.ball.pos.y = this.ball.pos.y < 0 ? 0 : this.canvas.height;
+						playSound('bounce');
+					}
+
+					// ---- 4) Collisions: Obstacles (improved) ----
+					this.obstacles.forEach(o => {
+					  const m = o._meta || {};
+
+					  // rotating_bar / reflect_wall: 用 segment-segment 最短距離（swept-segment prev->curr vs bar）
+					  if (m.kind === 'rotating_bar' || m.kind === 'reflect_wall') {
+						let a, b;
+						if (m.kind === 'rotating_bar') {
+						  // update rotating bar angle over time (if angularSpeed present)
+						  m.angle = (m.angle || 0) + (m.angularSpeed || 0.02);
+						  const half = (m.length || o.w) / 2;
+						  a = new Vec2(m.cx + Math.cos(m.angle) * -half, m.cy + Math.sin(m.angle) * -half);
+						  b = new Vec2(m.cx + Math.cos(m.angle) * half,  m.cy + Math.sin(m.angle) * half);
+						} else {
+						  a = new Vec2(m.x1, m.y1);
+						  b = new Vec2(m.x2, m.y2);
+						}
+
+						const dist = segmentSegmentDistance(prevPos, currPos, a, b);
+						if (dist <= (this.ball.r + 0.0001)) {
+						  // reflect velocity across bar normal
+						  const barDir = b.sub(a).normalize();
+						  let normal = new Vec2(-barDir.y, barDir.x);
+						  if (this.ball.vel.x * normal.x + this.ball.vel.y * normal.y > 0) normal = normal.mult(-1);
+						  const v = this.ball.vel;
+						  const dot = v.x * normal.x + v.y * normal.y;
+						  this.ball.vel.x = v.x - 2 * dot * normal.x;
+						  this.ball.vel.y = v.y - 2 * dot * normal.y;
+						  this.ball.vel = this.ball.vel.mult(0.9);
+
+						  if (o.isDeadly || m.lethal) { this.fail(); return; }
+						  else { playSound('bounce'); }
+						}
+						return;
+					  }
+
+					  // fallback to AABB collision for standard obstacles
+					  let closestX = Math.max(o.pos.x, Math.min(this.ball.pos.x, o.pos.x + o.w));
+					  let closestY = Math.max(o.pos.y, Math.min(this.ball.pos.y, o.pos.y + o.h));
+					  let distanceX = this.ball.pos.x - closestX;
+					  let distanceY = this.ball.pos.y - closestY;
+					  if ((distanceX*distanceX + distanceY*distanceY) < (this.ball.r * this.ball.r)) {
+						if (o.isDeadly) { this.fail(); }
+						else {
+						  playSound('bounce');
+						  if (Math.abs(distanceX) > Math.abs(distanceY)) {
+							this.ball.vel.x *= -0.9;
+							this.ball.pos.x += Math.sign(distanceX) * (this.ball.r - Math.abs(distanceX) + 1);
+						  } else {
+							this.ball.vel.y *= -0.9;
+							this.ball.pos.y += Math.sign(distanceY) * (this.ball.r - Math.abs(distanceY) + 1);
+						  }
+						}
+					  }
+					});
+
+
+					// queueZone penalty / randMine placement
+					this.obstacles.forEach(o => {
+					  const m = o._meta || {};
+					  if (m.kind === 'queueZone') {
+						const center = new Vec2(o.pos.x + o.w/2, o.pos.y + o.h/2);
+						const inside = this.segmentCircleIntersect(this.ball.startPos, this.ball.pos, center, m.r || (o.w/2));
+						if (inside && !m._penalized) {
+						  // spawn one randMine as penalty (only once)
+						  m._penalized = true;
+						  this.obstacles.push(this.createObstacleFromDescriptor({ type:'randMine', baseX:center.x, baseY:center.y, w:16, h:16 }));
+						}
+					  }
+					});
+
+
+					// ---- 5) Collisions: Stars (使用 swept-test，避免高速穿過) ----
+					for (let s of this.stars) {
+						if (s.collected) continue;
+						const gatherRadius = this.ball.r + s.r;
+						// 若線段 A->B 與星星圓相交 → 收集
+						if (this.segmentCircleIntersect(prevPos, currPos, s.pos, gatherRadius)) {
+							s.collected = true;
+							playSound('collect');
+							this.spawnParticles(s.pos.x, s.pos.y, '#ffd700', 15);
+							this.updateStarUI();
+						}
+					}
+					
+					// --- Wormhole teleport handling ---
+					// 使用兩層防護避免馬上反傳：
+					// 1) ball._teleCooldown (frame 倒數) — 一旦傳送就暫時鎖定傳送觸發。
+					// 2) ball._lastTeleFromId — 紀錄剛剛從哪個 wormhole 傳出，避免出口旁立刻再觸發該入口（或做雙向 check）。
+					if (!this.ball._teleCooldown) this.ball._teleCooldown = 0;
+					if (this.ball._teleCooldown > 0) this.ball._teleCooldown -= 1;
+
+					// 也可每 frame 清理 lastTeleFromId（當冷卻結束時）
+					if (this.ball._teleCooldown === 0 && this.ball._lastTeleFromId !== undefined) {
+						// 經過一些 frame 後允許再次透過（視需求可改）
+						this.ball._lastTeleFromId = undefined;
+					}
+
+					// 遍歷所有 wormholes（一次只處理一個）
+					for (let wh of (this.wormholes || [])) {
+						// 如果冷卻中跳過
+						if (this.ball._teleCooldown > 0) continue;
+
+						// 如果剛從該 wormhole 出來（避免立刻再回到入口）
+						if (this.ball._lastTeleFromId !== undefined && this.ball._lastTeleFromId === wh.id) continue;
+
+						// 使用 swept-test 判定 A->B 線段是否經過入口圓
+						const gatherRadius = this.ball.r + wh.r;
+						if (this.segmentCircleIntersect(prevPos, currPos, wh.pos, gatherRadius)) {
+							// 計算出口偏移：使用速度方向（若速度太小則用POS到EXIT方向）
+							let velDir;
+							const velMag = this.ball.vel.mag();
+							if (velMag > 0.001) {
+								velDir = this.ball.vel.normalize();
+							} else {
+								// 若速度接近 0，使用從入口到出口的方向
+								const dir = wh.exit.sub(wh.pos);
+								velDir = dir.mag() > 0.001 ? dir.normalize() : new Vec2(1,0);
+							}
+
+							// 設定新的位置：出口 + 沿速度方向的小偏移，避免立即被入口再次偵測
+							const offsetDist = this.ball.r + 6; // 可調
+							this.ball.pos.x = wh.exit.x + velDir.x * offsetDist;
+							this.ball.pos.y = wh.exit.y + velDir.y * offsetDist;
+
+							// 速度處理（選項）：保留原速度並略微衰減、或旋轉成通過出口方向
+							// 下面範例保留並衰減一點，避免瞬間過快：
+							this.ball.vel = this.ball.vel.mult(0.9);
+
+							// 設置 frame 冷卻，避免立即被任何入口再傳送（數值可依遊戲刷新率調整）
+							this.ball._teleCooldown = 20; // 20 frames，約 0.33s（在 60fps 下）
+							// 記錄剛剛從哪個 wormhole 傳出（可避免回到該入口）
+							this.ball._lastTeleFromId = wh.id;
+
+							// 音效與視覺反饋
+							playSound('place'); // 或你要新增一個 teleport 聲音
+							this.spawnParticles(wh.exit.x, wh.exit.y, '#a855f7', 30);
+
+							break; // 只處理第一個命中的 wormhole
+						}
+					}
+
+					
+					// ---- 6) Target: 使用 swept-test 判斷是否穿越傳送門 ----
+					const targetRadius = this.target.r + this.ball.r;
+					if (this.segmentCircleIntersect(prevPos, currPos, this.target.pos, targetRadius)) {
+						this.win();
+					}
+				}
+			}
+
+            fail() {
+                this.state = 'failed';
+                this.spawnParticles(this.ball.pos.x, this.ball.pos.y, '#ff0000', 30);
+                playSound('die');
+                this.ball.active = false;
+                setTimeout(() => this.resetLevel(), 1000);
+            }
+
+            win() {
+				try {
+					this.state = 'won';
+					this.spawnParticles(this.target.pos.x, this.target.pos.y, '#00ff66', 50);
+					playSound('win');
+					this.ball.active = false;
+
+					// Calculate Stars (容錯)
+					const starsCollected = (this.stars && Array.isArray(this.stars))
+						? this.stars.filter(s => s.collected).length
+						: 0;
+
+					// --- Save Progress (容錯 + 強制記錄已過關以解鎖下一關) ---
+					if (!this.progress || typeof this.progress !== 'object') {
+						// 確保 this.progress 是物件（例如 localStorage 被清空或讀取錯誤時）
+						this.progress = {};
+					}
+
+					// 讀出目前關卡的舊分數（若不存在則為 undefined）
+					const oldScore = this.progress[this.level];
+
+					// 計算要存的新分數：採用已記錄與本次 collected 的最大值（保留最高成績）
+					const newScore = Math.max((this.progress[this.level] || 0), starsCollected);
+
+					// 若之前沒有任何紀錄（第一次過關），oldScore 會是 undefined
+					if (oldScore === undefined) {
+						// 直接寫入 newScore（即使 newScore = 0，也代表「已通過一次」）
+						this.progress[this.level] = newScore;
+					} else if (newScore > oldScore) {
+						// 若本次比舊成績更好，更新為更高分
+						this.progress[this.level] = newScore;
+					}
+
+					// 嘗試寫回 localStorage（加 try/catch 避免 quota 或隱私模式錯誤造成整段停擺）
+					try {
+						localStorage.setItem('orbital_save', JSON.stringify(this.progress));
+					} catch (e) {
+						// 可選：console.warn('save failed', e);
+						// 這裡不拋錯，遊戲仍可繼續；但若 localStorage 不可用，關卡解鎖只會保留在記憶體中（刷新會遺失）
+					}
+
+					// 同步寫 cookie，保存 5 年（或調整天數）
+					try {
+					  setCookie('orbital_save', JSON.stringify(this.progress), 365*5);
+					} catch(e) {}
+					
+					// Update Win Modal UI (容錯)
+					const starContainer = document.getElementById('level-complete-stars');
+					if (starContainer) {
+						let starHtml = '';
+						for (let i = 0; i < 3; i++) {
+							starHtml += `<span class="${i < starsCollected ? 'filled' : ''}" style="color:${i < starsCollected ? '#ffd700' : '#333'}">★</span> `;
+						}
+						starContainer.innerHTML = starHtml;
+					}
+
+					// 顯示 modal：移除 hidden class（不要只改 style.display）
+					const modal = document.getElementById('level-complete-modal');
+					if (modal) {
+						modal.classList.remove('hidden');   // 移除 display:none !important 的來源
+						modal.style.display = 'flex';       // modal-overlay 本來是 flex 置中的
+						modal.style.zIndex = 9999;          // 確保 modal 在最上層
+					}
+
+					// 同步隱藏 main menu（避免蓋到 modal）
+					const mainMenu = document.getElementById('main-menu');
+					if (mainMenu) mainMenu.classList.add('hidden');
+
+				} catch (err) {
+					console.error('win() error:', err);
+					// fallback: 仍嘗試最基本的顯示
+					const modal = document.getElementById('level-complete-modal');
+					if (modal) {
+						modal.classList.remove('hidden');
+						modal.style.display = 'block';
+					}
+				}
+			}
+
+            draw() {
+                // Background
+                this.ctx.fillStyle = 'rgba(5, 5, 10, 0.3)';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Grid
+                if (this.state !== 'menu') {
+                    this.ctx.strokeStyle = 'rgba(50, 50, 70, 0.1)';
+                    this.ctx.lineWidth = 1;
+                    const gridSize = 50;
+                    this.ctx.beginPath();
+                    for(let x=0; x<this.canvas.width; x+=gridSize) { this.ctx.moveTo(x, 0); this.ctx.lineTo(x, this.canvas.height); }
+                    for(let y=0; y<this.canvas.height; y+=gridSize) { this.ctx.moveTo(0, y); this.ctx.lineTo(this.canvas.width, y); }
+                    this.ctx.stroke();
+                }
+
+                if (this.state !== 'menu') {
+                    this.obstacles.forEach(o => o.draw(this.ctx));
+                    this.stars.forEach(s => s.draw(this.ctx));
+                    this.target.draw(this.ctx);
+                    this.wells.forEach(w => w.draw(this.ctx));
+					if (this.wormholes && this.wormholes.length) {
+						this.wormholes.forEach(wh => wh.draw(this.ctx));
+					}
+                    if (this.ball) this.ball.draw(this.ctx);
+                    this.particles.forEach(p => p.draw(this.ctx));
+
+                    // Edit Mode UI Helper
+                    if (this.state === 'editing' && this.selectedTool !== 'eraser') {
+                        const isValid = (this.selectedTool === 'attract' && this.wells.filter(w=>w.type==='attract').length < this.maxWells.attract) ||
+                                      (this.selectedTool === 'repel' && this.wells.filter(w=>w.type==='repel').length < this.maxWells.repel);
+                        
+                        if (isValid) {
+                            this.ctx.beginPath();
+                            this.ctx.arc(this.mouse.x, this.mouse.y, 15, 0, Math.PI*2);
+                            this.ctx.strokeStyle = this.selectedTool === 'attract' ? '#a855f7' : '#f97316';
+                            this.ctx.globalAlpha = 0.5;
+                            this.ctx.stroke();
+                            this.ctx.globalAlpha = 1;
+                        }
+                    }
+                }
+            }
+
+            loop() {
+                this.update();
+                this.draw();
+                requestAnimationFrame(() => this.loop());
+            }
+        }
+
+        const game = new Game();
+		window.game = game;
+
+    </script>
+</body>
+</html>
