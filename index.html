@@ -4416,8 +4416,9 @@
 
             draw() {
                 // Background
-                this.ctx.fillStyle = 'rgba(5, 5, 10, 0.3)';
-                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+				this.ctx.fillStyle = '#05050a';
+				this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
                 // Grid
                 if (this.state !== 'menu') {
