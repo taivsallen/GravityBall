@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>引力軌道大師 (Orbital Master) - Star Edition</title>
-    <script src="https://cdn.tailwindcss.com">
-		function setCookie(name, value, days) {
-		  const maxAge = days ? ';max-age=' + (days*24*60*60) : '';
-		  document.cookie = `${name}=${encodeURIComponent(value)};path=/${maxAge};SameSite=Lax`;
-		}
-		function getCookie(name) {
-		  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-		  return m ? decodeURIComponent(m[2]) : null;
-		}
-	</script>
+    <script>
+  function setCookie(name, value, days) {
+    const maxAge = days ? ';max-age=' + (days*24*60*60) : '';
+    document.cookie = `${name}=${encodeURIComponent(value)};path=/${maxAge};SameSite=Lax`;
+  }
+  function getCookie(name) {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return m ? decodeURIComponent(m[2]) : null;
+  }
+</script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
 		/*
