@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>引力軌道大師 (Orbital Master) - Star Edition</title>
+	<script src="https://cdn.tailwindcss.com"></script>
     <script>
   function setCookie(name, value, days) {
     const maxAge = days ? ';max-age=' + (days*24*60*60) : '';
@@ -4416,9 +4417,8 @@
 
             draw() {
                 // Background
-                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-				this.ctx.fillStyle = '#05050a';
-				this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.fillStyle = 'rgba(5, 5, 10, 0.3)';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
                 // Grid
                 if (this.state !== 'menu') {
